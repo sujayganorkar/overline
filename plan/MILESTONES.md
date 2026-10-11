@@ -38,16 +38,19 @@ is only a proof of integration; choose production rendering based on device meas
 
 ## M4 — shared deterministic operation foundation
 
-Before broad editing work, create a small typed operation registry/executor used by the manual UI.
-Each operation has a stable identity/version, typed inputs, validation and document preconditions,
-read-only/mutating classification, undo/transaction behavior, confirmation policy, and structured
-results/errors. Keep this layer AI-neutral; it exists to make manual actions reliable and later give
-agents the exact same constrained tools.
+Implemented: the bridge exposes PdfCraft's existing automation tool registry (stable IDs, JSON
+schemas, read-only/destructive flags, command links) through `operation_catalog`/`execute_tool`,
+with document status (dirty, editable, undo/redo) on every mutating result. Manual UI calls the
+same handlers future agents will call. No agent loop, model integration, or arbitrary JSON-to-PDF
+path exists.
 
-Do not build an agent loop, model integration, generic plugin system, or arbitrary JSON-to-PDF path.
-Add operations as real PdfCraft capabilities are audited and implemented.
+## M5 — manual PDF editor product MVP (in progress)
 
-## M5 — manual PDF editor product MVP
+In progress: all upstream automation tools (annotations, pages/files, forms/signatures, redaction,
+OCR, optimize, export, undo/redo) are callable from the app's schema-driven operation browser, and
+`page_rotate` is verified end-to-end on Android. Remaining for the MVP claim: bespoke touch UIs per
+feature group, OCR model-download flow on device, encrypted-fixture password tests, and iOS
+packaging/validation.
 
 Complete the full manual capability set from [`PRODUCT.md`](PRODUCT.md), in testable sub-slices:
 

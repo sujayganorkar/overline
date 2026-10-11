@@ -14,9 +14,12 @@ Verified on this machine (Linux, NDK r27c, Flutter 3.47.7):
 | Engine work through the bridge | host verified | Rust integration test opens an engine-generated PDF, reads page count/size, renders 816×1056 PNG at 96 dpi, saves/reopens, rejects malformed input, and closes handles |
 | Android ARM64 + x86_64 native libraries and APK packaging | done | Build explicitly targets only ABIs with a PdfCraft library; debug/release APKs contain both |
 | Android app runtime (open/render/navigate/Save As/reopen) | verified | Android 15/API 35 x86_64 emulator; user reports success on Galaxy S26 Ultra (India) |
+| Editing operations end-to-end on Android | verified | `page_rotate` via in-app operation browser: dirty/undo state, Save As commit, reopen shows the edit |
 
 The app UI: open PDF (system document picker), page count, page render at 96 dpi (pinch-zoom), page
-navigation, password prompt, and Save As through the system document provider. The flow passed on
+navigation, password prompt, Save As through the system document provider, and an Editing tools
+browser exposing every PdfCraft automation operation (annotations, pages, forms, signatures,
+redaction, OCR, optimize, export, undo/redo) through schema-driven forms. The flow passed on
 the Android emulator and was user-confirmed on a Galaxy S26 Ultra. The phone's Android version and
 logs were not captured in the engineering session.
 

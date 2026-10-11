@@ -69,21 +69,13 @@ cross-compilation, APK packaging, and device checks. Do not follow upstream `mai
 
 ## Agent-ready operation boundary
 
-The current bridge methods (`open`, `page_count`, `render_page_png`, `save`, `close`) are proof-of-
-integration API calls, not yet the complete editor operation architecture. Before broad editing,
-introduce a small typed operation registry/executor and route manual UI actions through it. This is
-part of building the manual editor, not an agent runtime.
-
-Each real operation should describe:
-
-- Stable operation ID/version, typed arguments, and typed result.
-- Input validation and document/page/security preconditions.
-- Read-only versus mutating behavior; dirty-state and undo/transaction handling.
-- Destructive-action confirmation requirements and structured, actionable errors.
-- Progress/cancellation only when the underlying operation supports it.
-
-The executor dispatches to existing `pdfcraft-engine` APIs; no new PDF logic belongs in the adapter.
-Manual buttons call the same operation handlers future agents will call. Later, expose operation
-descriptions/schemas to a constrained planner. Do not add chat/model code, arbitrary JSON-to-PDF
-calls, filesystem access for models, a generic plugin system, or autonomous execution during the
-manual MVP.
+The bridge hosts PdfCraft's `Automation` tool registry (`pdfcraft-automation`, default features off
+so the MCP server is not compiled in) on its single worker thread. Flutter calls
+`operation_catalog` for tool IDs, titles, descriptions and JSON schemas (with the internal `doc`
+argument stripped), and `execute_tool` for schema-validated execution returning structured
+JSON/PNG results plus fresh document status (page count, dirty, editable, undo/redo labels).
+File lifecycle stays behind mobile-safe methods: `open` stages picker bytes into a confined app
+workspace, `save_snapshot`/`commit_save`/`cancel_save` guard Save As against concurrent edits, and
+`close` refuses dirty documents without explicit discard. `stage_file`/`read_output` confine
+supporting-file and tool-output paths to the workspace. No model, chat, MCP server, or autonomous
+loop exists in the app; the registry is the same table future agents will call.

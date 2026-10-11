@@ -1,8 +1,8 @@
 # Project status
 
-**Updated:** 2026-10-12  
-**Current milestone:** M1 — Android PDF viewer vertical slice (emulator and physical phone verified)  
-**Next acceptance:** continue M2 file-safety/lifecycle checks, then validate iOS on macOS/Xcode.
+**Updated:** 2026-10-12
+**Current milestone:** M4/M5 — shared operation layer + manual editing tools (Android verified)
+**Next acceptance:** bespoke touch UIs per feature group; iOS packaging on macOS/Xcode.
 
 **Product scope decision:** the first product MVP covers the complete agreed manual PDF editing
 scope. Agent UI, model runtimes, and cloud execution are later; the typed operation foundation is
@@ -40,6 +40,14 @@ designed during manual feature development so both paths share deterministic han
   pre-push hook was exercised and correctly blocked the current dirty worktree.
 - `.github/workflows/android-apk.yml` runs tests and uploads a 30-day APK artifact per pushed
   commit. Its first GitHub run is pending the next push after these changes are committed.
+- The bridge now hosts PdfCraft's `Automation` tool registry on its worker thread and exposes
+  `operation_catalog`/`execute_tool` over FRB. The Flutter app has an Editing tools browser that
+  renders every upstream tool's JSON schema as an argument form (search, destructive confirmation,
+  file staging, result display, output Save As).
+- On the x86_64 Android 15/API 35 emulator, the app opened a 2-page engine-generated PDF, ran
+  `page_rotate` (pages [1], 90°) from the operation browser, showed `dirty: true` / `undo: "Rotate
+  page"`, saved via Save As with a generation-guarded commit, and reopened the saved copy with the
+  rotation visibly applied in the render. Filtered logcat showed no fatal errors.
 
 ## Verified engineering changes
 
@@ -53,8 +61,11 @@ designed during manual feature development so both paths share deterministic han
 
 ## Not verified
 
-- Physical ARM64 Android performance/device-specific provider behavior.
+- Physical ARM64 Android run of the new automation-backed build (prior viewer build passed on a
+  Galaxy S26 Ultra; re-test the editing build on-device when convenient).
 - iOS: Rust target build, linking, bridge load, document provider, and device behavior.
 - Password-protected PDF behavior with a real encrypted fixture; current host test passes an empty
   password to an unencrypted fixture only.
-- Large-document performance, provider overwrite guarantees, and interrupted Save As recovery.
+- OCR tools need downloadable models; not exercised on device.
+- Bespoke per-feature touch UIs (finger drawing canvas, form widgets, signature pad) beyond the
+  schema-driven operation browser.

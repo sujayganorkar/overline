@@ -389,10 +389,11 @@ fn open_document(state: &mut Runtime, request: OpenReq) -> Result<u32, String> {
     let following = handle
         .checked_add(1)
         .ok_or_else(|| "mobile document handle limit reached".to_owned())?;
-    let staging_path = format!(
-        "imports/mobile-{handle}-{}.pdf",
-        safe_file_name(&request.name)
-    );
+    let mut staging_name = safe_file_name(&request.name);
+    if staging_name.len() > 4 && !staging_name.to_ascii_lowercase().ends_with(".pdf") {
+        staging_name.push_str(".pdf");
+    }
+    let staging_path = format!("imports/mobile-{handle}-{staging_name}");
     let absolute = state.root.join(&staging_path);
     if let Some(parent) = absolute.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("create import folder: {error}"))?;
