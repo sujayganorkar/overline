@@ -1,0 +1,18 @@
+[package]
+name = "pdfcraft-mobile-api"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.13.0"
+pdfcraft-engine = { workspace = true }
+pdfcraft-render = { workspace = true }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }
+
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
