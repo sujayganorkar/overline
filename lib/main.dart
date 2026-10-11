@@ -447,11 +447,6 @@ class _ViewerPageState extends State<ViewerPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _busy ? null : _open,
-        tooltip: 'Open PDF',
-        child: const Icon(Icons.folder_open),
-      ),
     );
   }
 }
