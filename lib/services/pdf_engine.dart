@@ -1,7 +1,6 @@
-import 'dart:io';
-import 'dart:typed_data';
+import 'dart:io' show Platform;
 
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../bridge/frb_generated.dart';
@@ -125,9 +124,18 @@ class PdfCraftEngine implements PdfEngineApi {
 typedef PdfEngineFactory = Future<PdfEngineApi> Function();
 
 Future<PdfEngineApi> createPdfCraftEngine() async {
-  final support = await getApplicationSupportDirectory();
-  final workspace = Directory('${support.path}/pdfcraft-workspace');
-  await workspace.create(recursive: true);
+  // First-party channel (see MainActivity.kt): avoids plugins that ship
+  // prebuilt native libraries for ABIs without a PdfCraft build.
+  if (!Platform.isAndroid) {
+    throw UnsupportedError(
+      'PdfCraft Mobile currently supports Android only; iOS packaging is a later milestone.',
+    );
+  }
+  const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  final workspace = await channel.invokeMethod<String>('getSupportDir');
+  if (workspace == null || workspace.isEmpty) {
+    throw StateError('Could not locate the app support directory');
+  }
   await RustLib.init();
-  return PdfCraftEngine(bridge.Engine(workspace: workspace.path));
+  return PdfCraftEngine(bridge.Engine(workspace: workspace));
 }
