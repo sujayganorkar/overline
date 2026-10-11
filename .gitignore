@@ -25,6 +25,9 @@ android/app/debug
 android/app/profile
 android/app/release
 
+# Cross-compiled engine libraries (build artifacts from `cargo ndk build`)
+android/app/src/main/jniLibs/
+
 # macOS/Windows noise
 .DS_Store
 
