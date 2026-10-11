@@ -1,6 +1,4 @@
-// End-to-end smoke test of the bridge against the real engine: the engine's own
-// `create_from_text` produces a PDF, which the adapter opens, inspects, renders to PNG,
-// saves, and re-opens.
+// End-to-end mobile operation test against the existing PdfCraft automation registry and engine.
 
 use pdfcraft_mobile_api::Engine;
 
@@ -13,45 +11,170 @@ fn png_dimensions(png: &[u8]) -> (u32, u32) {
 }
 
 #[tokio::test]
-async fn open_render_save_roundtrip() {
+async fn manual_operation_catalog_edit_undo_save_reopen() {
+    let workspace = tempfile::tempdir().expect("create app sandbox");
+    let engine = Engine::new(workspace.path().to_string_lossy().into_owned());
     let source = pdfcraft_engine::Session::new()
         .create_from_text("hello", "Hello PdfCraft Mobile")
         .expect("engine could not create a test PDF");
-    assert!(source.len() > 500, "engine produced a suspiciously small PDF: {} bytes", source.len());
+    assert!(
+        source.len() > 500,
+        "engine produced a suspiciously small PDF"
+    );
 
-    let engine = Engine::new();
+    let catalog = engine
+        .operation_catalog()
+        .await
+        .expect("operation catalog failed");
+    for required in [
+        "page_rotate",
+        "page_delete",
+        "comment_add",
+        "form_fields",
+        "edit_undo",
+    ] {
+        assert!(
+            catalog.iter().any(|operation| operation.id == required),
+            "missing {required}"
+        );
+    }
+    assert!(
+        catalog
+            .iter()
+            .all(|operation| !operation.input_schema_json.contains("\"doc\""))
+    );
 
-    // Open: page count comes from the engine's inspection.
-    let doc = engine.open("hello.pdf".to_owned(), source.to_vec(), None).await.expect("open failed");
-    let pages = engine.page_count(doc).await.expect("page_count failed");
-    assert_eq!(pages, 1, "the engine created a one-page PDF");
+    let doc = engine
+        .open("hello.pdf".to_owned(), source.to_vec(), None)
+        .await
+        .expect("open failed");
+    assert_eq!(engine.page_count(doc).await.expect("page count failed"), 1);
 
-    // Page size comes from the engine's page inspection (letter: 612x792).
-    let size = engine.page_size(doc, 1).await.expect("page_size failed");
-    assert!((size.width - 612.0).abs() < 1.0 && (size.height - 792.0).abs() < 1.0, "unexpected size {:?}", (size.width, size.height));
+    let before = engine.page_size(doc, 1).await.expect("page size failed");
+    assert!((before.width - 612.0).abs() < 1.0 && (before.height - 792.0).abs() < 1.0);
 
-    // Render at 96 dpi: 612pt = 8.5in = 816px, 792pt = 1056px.
-    let png = engine.render_page_png(doc, 1, 96).await.expect("render failed");
-    let (w, h) = png_dimensions(&png);
-    assert_eq!((w, h), (816, 1056), "unexpected raster size");
+    let rendered = engine
+        .render_page_png(doc, 1, 96)
+        .await
+        .expect("render failed");
+    assert_eq!(png_dimensions(&rendered), (816, 1056));
 
-    // Out-of-range and 0-based page requests are rejected, not panicked.
+    let rotated = engine
+        .execute_tool(
+            doc,
+            "page_rotate".to_owned(),
+            r#"{"pages":[1],"degrees":90}"#.to_owned(),
+        )
+        .await
+        .expect("page rotate operation failed");
+    assert!(rotated.status.dirty);
+    assert_eq!(rotated.status.can_undo, "Rotate page");
+    let after = engine
+        .page_size(doc, 1)
+        .await
+        .expect("rotated page size failed");
+    assert!((after.width - before.height).abs() < 1.0 && (after.height - before.width).abs() < 1.0);
+
+    let undone = engine
+        .execute_tool(doc, "edit_undo".to_owned(), "{}".to_owned())
+        .await
+        .expect("undo operation failed");
+    assert_eq!(undone.status.can_undo, "");
+    assert_eq!(undone.status.can_redo, "Rotate page");
+
+    let redone = engine
+        .execute_tool(doc, "edit_redo".to_owned(), "{}".to_owned())
+        .await
+        .expect("redo operation failed");
+    assert_eq!(redone.status.can_undo, "Rotate page");
+
+    assert!(
+        engine
+            .execute_tool(
+                doc,
+                "page_rotate".to_owned(),
+                r#"{"pages":[1],"degrees":45}"#.to_owned()
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        engine
+            .execute_tool(doc, "doc_save".to_owned(), "{}".to_owned())
+            .await
+            .is_err(),
+        "file lifecycle tools stay behind mobile-safe methods"
+    );
     assert!(engine.render_page_png(doc, 0, 96).await.is_err());
-    assert!(engine.render_page_png(doc, 2, 96).await.is_err());
-    assert!(engine.page_size(doc, 99).await.is_err());
-    assert!(engine.page_count(4242).await.is_err(), "an unknown handle must error, not panic");
+    assert!(engine.status(4242).await.is_err());
 
-    // Save: the working file round-trips through another open.
-    let saved = engine.save(doc).await.expect("save failed");
-    assert!(saved.starts_with(b"%PDF"), "the working file is not a PDF");
-    let doc2 = engine.open("saved.pdf".to_owned(), saved, None).await.expect("re-open of the saved file failed");
-    assert_eq!(engine.page_count(doc2).await.expect("page_count failed"), 1, "the saved file must keep its page count");
+    let snapshot = engine
+        .save_snapshot(doc)
+        .await
+        .expect("save snapshot failed");
+    assert!(snapshot.bytes.starts_with(b"%PDF"));
+    assert!(
+        engine.close(doc, false).await.is_err(),
+        "dirty documents must not close silently"
+    );
 
-    // Password path: an empty password round-trips.
-    let doc3 = engine.open("again.pdf".to_owned(), source.to_vec(), Some(String::new())).await.expect("open with a password failed");
-    let png3 = engine.render_page_png(doc3, 1, 72).await.expect("render at 72 dpi failed");
-    assert_eq!(png_dimensions(&png3), (612, 792));
+    let reopened = engine
+        .open("saved.pdf".to_owned(), snapshot.bytes.clone(), None)
+        .await
+        .expect("saved bytes did not reopen");
+    assert_eq!(
+        engine
+            .page_count(reopened)
+            .await
+            .expect("reopened page count failed"),
+        1
+    );
+    assert_eq!(
+        png_dimensions(
+            &engine
+                .render_page_png(reopened, 1, 72)
+                .await
+                .expect("reopen render failed")
+        ),
+        (792, 612)
+    );
 
-    engine.close(doc).await.expect("close failed");
-    assert!(engine.page_count(doc).await.is_err(), "a closed handle must error");
+    engine
+        .commit_save(doc, snapshot.token)
+        .await
+        .expect("mark saved failed");
+    assert!(!engine.status(doc).await.expect("status failed").dirty);
+    engine
+        .close(doc, false)
+        .await
+        .expect("clean document close failed");
+    engine
+        .close(reopened, false)
+        .await
+        .expect("reopened document close failed");
+    assert!(engine.status(doc).await.is_err());
+
+    let bad = engine
+        .open("bad.pdf".to_owned(), b"not a PDF".to_vec(), None)
+        .await;
+    assert!(bad.is_err(), "malformed PDFs must be reported as errors");
+
+    let staged = engine
+        .stage_file("../unsafe-name.txt".to_owned(), b"safe".to_vec())
+        .await
+        .expect("stage file failed");
+    assert!(!staged.contains(".."));
+    assert_eq!(
+        engine
+            .read_output(staged)
+            .await
+            .expect("read staged file failed"),
+        b"safe"
+    );
+    assert!(
+        engine
+            .read_output("../../etc/passwd".to_owned())
+            .await
+            .is_err()
+    );
 }

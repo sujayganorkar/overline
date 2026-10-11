@@ -7,44 +7,189 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `dropped`, `index`, `open_doc`, `page_size`, `render_page`, `worker_main`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Cmd`, `OpenDoc`, `OpenReq`
+// These functions are ignored because they are not marked as `pub`: `cancel_save`, `checked_page`, `close_document`, `commit_save`, `dispatch`, `document_status`, `execute_tool`, `mobile_tool`, `open_document`, `operation_info`, `page_size`, `prepare_runtime`, `read_output`, `render_page`, `safe_file_name`, `save_snapshot`, `stage_file`, `tool_catalog`, `worker_gone`, `worker_main`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Cmd`, `MobileDoc`, `OpenReq`, `PendingSave`, `Runtime`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Engine>>
 abstract class Engine implements RustOpaqueInterface {
-  /// Drop the document locally. (The engine session keeps its parsed state until process end;
-  /// a session-level close is future work.)
-  Future<void> close({required int handle});
+  Future<void> cancelSave({required int handle, required int token});
 
-  factory Engine() => RustLib.instance.api.crateApiEngineNew();
+  Future<void> close({required int handle, required bool discardChanges});
 
-  /// Open a PDF (`name` is used for titles/labels; `password` for encrypted documents).
-  /// Returns a document handle.
+  /// Mark a save complete only if the document has not changed since its byte snapshot.
+  Future<void> commitSave({required int handle, required int token});
+
+  /// Invoke one schema-validated upstream automation tool for the open document.
+  Future<OperationResponse> executeTool({
+    required int handle,
+    required String tool,
+    required String argumentsJson,
+  });
+
+  factory Engine({required String workspace}) =>
+      RustLib.instance.api.crateApiEngineNew(workspace: workspace);
+
   Future<int> open({
     required String name,
     required List<int> bytes,
     String? password,
   });
 
+  Future<List<OperationInfo>> operationCatalog();
+
   Future<int> pageCount({required int handle});
 
   Future<PageSize> pageSize({required int handle, required int page1Based});
 
-  /// Render one page (1-based) to PNG at `dpi`. The render itself runs on the worker thread;
-  /// the engine's renderer is panic-guarded and never aborts the process.
+  /// Read an output path returned by an upstream tool, confined to this app's workspace.
+  Future<Uint8List> readOutput({required String path});
+
   Future<Uint8List> renderPagePng({
     required int handle,
     required int page1Based,
     required int dpi,
   });
 
-  /// The working file the engine would save right now (incremental write over the original
-  /// bytes; unsaved edits are included).
-  Future<Uint8List> save({required int handle});
+  Future<SaveSnapshot> saveSnapshot({required int handle});
+
+  /// Copy a user-selected supporting file into the confined mobile workspace. The returned
+  /// relative path can be passed to upstream tools that accept an image/data-file path.
+  Future<String> stageFile({required String name, required List<int> bytes});
+
+  Future<DocumentStatus> status({required int handle});
 }
 
-/// Displayed size of a page, in points.
+class DocumentStatus {
+  final int pageCount;
+  final bool dirty;
+  final bool editable;
+  final String canUndo;
+  final String canRedo;
+
+  const DocumentStatus({
+    required this.pageCount,
+    required this.dirty,
+    required this.editable,
+    required this.canUndo,
+    required this.canRedo,
+  });
+
+  @override
+  int get hashCode =>
+      pageCount.hashCode ^
+      dirty.hashCode ^
+      editable.hashCode ^
+      canUndo.hashCode ^
+      canRedo.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DocumentStatus &&
+          runtimeType == other.runtimeType &&
+          pageCount == other.pageCount &&
+          dirty == other.dirty &&
+          editable == other.editable &&
+          canUndo == other.canUndo &&
+          canRedo == other.canRedo;
+}
+
+/// Structured result from an upstream PdfCraft operation. Exactly one payload is populated.
+class OperationContent {
+  final String json;
+  final Uint8List png;
+  final int width;
+  final int height;
+
+  const OperationContent({
+    required this.json,
+    required this.png,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  int get hashCode =>
+      json.hashCode ^ png.hashCode ^ width.hashCode ^ height.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OperationContent &&
+          runtimeType == other.runtimeType &&
+          json == other.json &&
+          png == other.png &&
+          width == other.width &&
+          height == other.height;
+}
+
+/// The operation browser uses the same automation tool schemas as PdfCraft's headless interfaces.
+class OperationInfo {
+  final String id;
+  final String title;
+  final String description;
+  final String inputSchemaJson;
+  final bool readOnly;
+  final bool destructive;
+  final String commandId;
+  final bool requiresDocument;
+
+  const OperationInfo({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.inputSchemaJson,
+    required this.readOnly,
+    required this.destructive,
+    required this.commandId,
+    required this.requiresDocument,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      title.hashCode ^
+      description.hashCode ^
+      inputSchemaJson.hashCode ^
+      readOnly.hashCode ^
+      destructive.hashCode ^
+      commandId.hashCode ^
+      requiresDocument.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OperationInfo &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title &&
+          description == other.description &&
+          inputSchemaJson == other.inputSchemaJson &&
+          readOnly == other.readOnly &&
+          destructive == other.destructive &&
+          commandId == other.commandId &&
+          requiresDocument == other.requiresDocument;
+}
+
+class OperationResponse {
+  final List<OperationContent> contents;
+  final DocumentStatus status;
+
+  const OperationResponse({required this.contents, required this.status});
+
+  @override
+  int get hashCode => contents.hashCode ^ status.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OperationResponse &&
+          runtimeType == other.runtimeType &&
+          contents == other.contents &&
+          status == other.status;
+}
+
 class PageSize {
   final double width;
   final double height;
@@ -61,4 +206,22 @@ class PageSize {
           runtimeType == other.runtimeType &&
           width == other.width &&
           height == other.height;
+}
+
+class SaveSnapshot {
+  final int token;
+  final Uint8List bytes;
+
+  const SaveSnapshot({required this.token, required this.bytes});
+
+  @override
+  int get hashCode => token.hashCode ^ bytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SaveSnapshot &&
+          runtimeType == other.runtimeType &&
+          token == other.token &&
+          bytes == other.bytes;
 }

@@ -7,9 +7,9 @@ Cargo.lock.tmp
 .dart_tool/
 .packages
 build/
+dist/apk/
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
 ios/Pods/
 ios/.symlinks/
 ios/Flutter/Flutter.framework

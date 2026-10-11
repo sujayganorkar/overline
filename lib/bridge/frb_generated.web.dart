@@ -49,7 +49,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  bool dco_decode_bool(dynamic raw);
+
+  @protected
+  DocumentStatus dco_decode_document_status(dynamic raw);
+
+  @protected
   double dco_decode_f_32(dynamic raw);
+
+  @protected
+  List<OperationContent> dco_decode_list_operation_content(dynamic raw);
+
+  @protected
+  List<OperationInfo> dco_decode_list_operation_info(dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -58,10 +70,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  OperationContent dco_decode_operation_content(dynamic raw);
+
+  @protected
+  OperationInfo dco_decode_operation_info(dynamic raw);
+
+  @protected
+  OperationResponse dco_decode_operation_response(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
   PageSize dco_decode_page_size(dynamic raw);
+
+  @protected
+  SaveSnapshot dco_decode_save_snapshot(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -97,7 +121,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  DocumentStatus sse_decode_document_status(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer);
+
+  @protected
+  List<OperationContent> sse_decode_list_operation_content(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<OperationInfo> sse_decode_list_operation_info(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
@@ -106,10 +146,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  OperationContent sse_decode_operation_content(SseDeserializer deserializer);
+
+  @protected
+  OperationInfo sse_decode_operation_info(SseDeserializer deserializer);
+
+  @protected
+  OperationResponse sse_decode_operation_response(SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
   PageSize sse_decode_page_size(SseDeserializer deserializer);
+
+  @protected
+  SaveSnapshot sse_decode_save_snapshot(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -125,9 +177,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
-
-  @protected
-  bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
   void
@@ -154,7 +203,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_document_status(
+    DocumentStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_operation_content(
+    List<OperationContent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_operation_info(
+    List<OperationInfo> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
@@ -166,10 +236,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_operation_content(
+    OperationContent self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_operation_info(OperationInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_operation_response(
+    OperationResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
   void sse_encode_page_size(PageSize self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_save_snapshot(SaveSnapshot self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
@@ -185,9 +273,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer);
 }
 
 // Section: wire_class

@@ -17,6 +17,11 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.pdfcraft.pdfcraft_mobile"
+        ndk {
+            // The PdfCraft bridge is built for these ABIs. Avoid APKs that contain Flutter but
+            // lack the Rust library, which would fail only at runtime on older ARMv7 devices.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

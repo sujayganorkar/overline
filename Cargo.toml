@@ -1,22 +1,23 @@
 [workspace]
 resolver = "3"
 members = ["rust"]
+exclude = ["third_party/pdfcraft"]
 
 # PdfCraft vendors patched hayro/lopdf (patches bound upstream). Patch crates.io to the fork's
 # vendor/ so our build matches the engine's tested behavior exactly.
 [patch.crates-io]
-hayro = { path = "/home/sujay/src/pdfcraft/vendor/hayro" }
-hayro-interpret = { path = "/home/sujay/src/pdfcraft/vendor/hayro-interpret" }
-hayro-syntax = { path = "/home/sujay/src/pdfcraft/vendor/hayro-syntax" }
-hayro-jbig2 = { path = "/home/sujay/src/pdfcraft/vendor/hayro-jbig2" }
-lopdf = { path = "/home/sujay/src/pdfcraft/vendor/lopdf" }
+hayro = { path = "third_party/pdfcraft/vendor/hayro" }
+hayro-interpret = { path = "third_party/pdfcraft/vendor/hayro-interpret" }
+hayro-syntax = { path = "third_party/pdfcraft/vendor/hayro-syntax" }
+lopdf = { path = "third_party/pdfcraft/vendor/lopdf" }
 
 [workspace.dependencies]
-flutter_rust_bridge = "2.13"
-# Upstream PdfCraft engine (private fork of https://github.com/storytold/pdfcraft).
-# Cloned to ~/src/pdfcraft; `origin` tracks upstream, local branches carry our patches (if any).
-pdfcraft-engine = { path = "/home/sujay/src/pdfcraft/crates/engine" }
-pdfcraft-render = { path = "/home/sujay/src/pdfcraft/crates/render" }
+flutter_rust_bridge = "=2.13.0"
+# Pinned PdfCraft upstream submodule; see .gitmodules and plan/decisions/.
+pdfcraft-engine = { path = "third_party/pdfcraft/crates/engine" }
+pdfcraft-render = { path = "third_party/pdfcraft/crates/render" }
+pdfcraft-automation = { path = "third_party/pdfcraft/crates/automation", default-features = false }
+serde_json = "1"
 
 # Fast iteration for mobile builds; upstream's release profile (lto thin, codegen-units 1) is
 # slow to link a cdylib this size.

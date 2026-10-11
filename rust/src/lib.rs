@@ -1,3 +1,6 @@
+#![deny(unsafe_code)]
+
+#[allow(unsafe_code)]
 mod frb_generated;
 
 // PdfCraft mobile bridge: Flutter UI <-> PdfCraft Rust engine over flutter_rust_bridge.

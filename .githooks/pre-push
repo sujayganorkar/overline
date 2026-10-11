@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+HEAD_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+PUSHES_HEAD=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [[ -z "${local_sha:-}" ]] && continue
+    [[ "$local_sha" =~ ^0+$ ]] && continue # deleted ref; no new APK to build
+
+    commit="$(git -C "$ROOT" rev-parse "$local_sha^{commit}")"
+    if [[ "$commit" != "$HEAD_COMMIT" ]]; then
+        printf 'APK pre-push hook builds HEAD only; pushed %s resolves to %s, HEAD is %s.\n' \
+            "$local_ref" "$commit" "$HEAD_COMMIT" >&2
+        exit 1
+    fi
+    PUSHES_HEAD=1
+done
+
+[[ "$PUSHES_HEAD" == 1 ]] || exit 0
+
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]]; then
+    printf 'Refusing to push with a dirty worktree so the local APK matches the pushed commit.\n' >&2
+    printf 'Commit or stash changes, then retry the push.\n' >&2
+    exit 1
+fi
+
+printf 'Building the release APK for pushed commit %s...\n' "${HEAD_COMMIT:0:12}"
+"$ROOT/tools/build-apk.sh"

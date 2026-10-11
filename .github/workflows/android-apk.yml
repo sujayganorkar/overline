@@ -1,0 +1,85 @@
+name: Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build installable APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out project and pinned PdfCraft engine
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-linux-android,x86_64-linux-android
+          components: rustfmt,clippy
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android SDK and NDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+          cache: true
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Verify Rust and Flutter code
+        run: |
+          cargo fmt --all --check
+          cargo test --locked -p pdfcraft-mobile-api
+          cargo clippy --locked -p pdfcraft-mobile-api --all-targets -- -D warnings
+          flutter pub get --enforce-lockfile
+          flutter analyze
+          flutter test
+
+      - name: Build release APK (same script as local pre-push)
+        run: tools/build-apk.sh
+
+      - name: Name APK by source commit
+        id: apk
+        run: |
+          APK="dist/apk/PdfCraft-Mobile-${GITHUB_SHA:0:12}.apk"
+          cp dist/apk/PdfCraft-Mobile-latest.apk "$APK"
+          sha256sum "$APK" > "$APK.sha256"
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "## Android test APK" >> "$GITHUB_STEP_SUMMARY"
+          echo "Built from commit \`${GITHUB_SHA}\` (Android ARM64 + x86_64). Download the APK from this run's Artifacts section." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload downloadable APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PdfCraft-Mobile-${{ github.sha }}
+          path: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.apk.outputs.path }}.sha256
+          if-no-files-found: error
+          retention-days: 30

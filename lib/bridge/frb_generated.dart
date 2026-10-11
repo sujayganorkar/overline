@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 159629578;
+  int get rustContentHash => 1207856970;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -79,15 +79,42 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
-  Future<void> crateApiEngineClose({required Engine that, required int handle});
+  Future<void> crateApiEngineCancelSave({
+    required Engine that,
+    required int handle,
+    required int token,
+  });
 
-  Engine crateApiEngineNew();
+  Future<void> crateApiEngineClose({
+    required Engine that,
+    required int handle,
+    required bool discardChanges,
+  });
+
+  Future<void> crateApiEngineCommitSave({
+    required Engine that,
+    required int handle,
+    required int token,
+  });
+
+  Future<OperationResponse> crateApiEngineExecuteTool({
+    required Engine that,
+    required int handle,
+    required String tool,
+    required String argumentsJson,
+  });
+
+  Engine crateApiEngineNew({required String workspace});
 
   Future<int> crateApiEngineOpen({
     required Engine that,
     required String name,
     required List<int> bytes,
     String? password,
+  });
+
+  Future<List<OperationInfo>> crateApiEngineOperationCatalog({
+    required Engine that,
   });
 
   Future<int> crateApiEnginePageCount({
@@ -101,6 +128,11 @@ abstract class RustLibApi extends BaseApi {
     required int page1Based,
   });
 
+  Future<Uint8List> crateApiEngineReadOutput({
+    required Engine that,
+    required String path,
+  });
+
   Future<Uint8List> crateApiEngineRenderPagePng({
     required Engine that,
     required int handle,
@@ -108,7 +140,18 @@ abstract class RustLibApi extends BaseApi {
     required int dpi,
   });
 
-  Future<Uint8List> crateApiEngineSave({
+  Future<SaveSnapshot> crateApiEngineSaveSnapshot({
+    required Engine that,
+    required int handle,
+  });
+
+  Future<String> crateApiEngineStageFile({
+    required Engine that,
+    required String name,
+    required List<int> bytes,
+  });
+
+  Future<DocumentStatus> crateApiEngineStatus({
     required Engine that,
     required int handle,
   });
@@ -129,9 +172,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
-  Future<void> crateApiEngineClose({
+  Future<void> crateApiEngineCancelSave({
     required Engine that,
     required int handle,
+    required int token,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -142,6 +186,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             serializer,
           );
           sse_encode_u_32(handle, serializer);
+          sse_encode_u_32(token, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -153,8 +198,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_unit,
           decodeErrorData: sse_decode_String,
         ),
+        constMeta: kCrateApiEngineCancelSaveConstMeta,
+        argValues: [that, handle, token],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineCancelSaveConstMeta => const TaskConstMeta(
+    debugName: "Engine_cancel_save",
+    argNames: ["that", "handle", "token"],
+  );
+
+  @override
+  Future<void> crateApiEngineClose({
+    required Engine that,
+    required int handle,
+    required bool discardChanges,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_u_32(handle, serializer);
+          sse_encode_bool(discardChanges, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
         constMeta: kCrateApiEngineCloseConstMeta,
-        argValues: [that, handle],
+        argValues: [that, handle, discardChanges],
         apiImpl: this,
       ),
     );
@@ -162,16 +246,97 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiEngineCloseConstMeta => const TaskConstMeta(
     debugName: "Engine_close",
-    argNames: ["that", "handle"],
+    argNames: ["that", "handle", "discardChanges"],
   );
 
   @override
-  Engine crateApiEngineNew() {
+  Future<void> crateApiEngineCommitSave({
+    required Engine that,
+    required int handle,
+    required int token,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_u_32(handle, serializer);
+          sse_encode_u_32(token, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineCommitSaveConstMeta,
+        argValues: [that, handle, token],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineCommitSaveConstMeta => const TaskConstMeta(
+    debugName: "Engine_commit_save",
+    argNames: ["that", "handle", "token"],
+  );
+
+  @override
+  Future<OperationResponse> crateApiEngineExecuteTool({
+    required Engine that,
+    required int handle,
+    required String tool,
+    required String argumentsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_u_32(handle, serializer);
+          sse_encode_String(tool, serializer);
+          sse_encode_String(argumentsJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_operation_response,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineExecuteToolConstMeta,
+        argValues: [that, handle, tool, argumentsJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineExecuteToolConstMeta => const TaskConstMeta(
+    debugName: "Engine_execute_tool",
+    argNames: ["that", "handle", "tool", "argumentsJson"],
+  );
+
+  @override
+  Engine crateApiEngineNew({required String workspace}) {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
+          sse_encode_String(workspace, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
         },
         codec: SseCodec(
           decodeSuccessData:
@@ -179,14 +344,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: null,
         ),
         constMeta: kCrateApiEngineNewConstMeta,
-        argValues: [],
+        argValues: [workspace],
         apiImpl: this,
       ),
     );
   }
 
   TaskConstMeta get kCrateApiEngineNewConstMeta =>
-      const TaskConstMeta(debugName: "Engine_new", argNames: []);
+      const TaskConstMeta(debugName: "Engine_new", argNames: ["workspace"]);
 
   @override
   Future<int> crateApiEngineOpen({
@@ -209,7 +374,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 6,
             port: port_,
           );
         },
@@ -230,6 +395,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<List<OperationInfo>> crateApiEngineOperationCatalog({
+    required Engine that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_operation_info,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineOperationCatalogConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineOperationCatalogConstMeta =>
+      const TaskConstMeta(
+        debugName: "Engine_operation_catalog",
+        argNames: ["that"],
+      );
+
+  @override
   Future<int> crateApiEnginePageCount({
     required Engine that,
     required int handle,
@@ -246,7 +447,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 8,
             port: port_,
           );
         },
@@ -285,7 +486,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 9,
             port: port_,
           );
         },
@@ -303,6 +504,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiEnginePageSizeConstMeta => const TaskConstMeta(
     debugName: "Engine_page_size",
     argNames: ["that", "handle", "page1Based"],
+  );
+
+  @override
+  Future<Uint8List> crateApiEngineReadOutput({
+    required Engine that,
+    required String path,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineReadOutputConstMeta,
+        argValues: [that, path],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineReadOutputConstMeta => const TaskConstMeta(
+    debugName: "Engine_read_output",
+    argNames: ["that", "path"],
   );
 
   @override
@@ -326,7 +564,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 11,
             port: port_,
           );
         },
@@ -348,7 +586,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Uint8List> crateApiEngineSave({
+  Future<SaveSnapshot> crateApiEngineSaveSnapshot({
     required Engine that,
     required int handle,
   }) {
@@ -364,23 +602,99 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 12,
             port: port_,
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeSuccessData: sse_decode_save_snapshot,
           decodeErrorData: sse_decode_String,
         ),
-        constMeta: kCrateApiEngineSaveConstMeta,
+        constMeta: kCrateApiEngineSaveSnapshotConstMeta,
         argValues: [that, handle],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiEngineSaveConstMeta => const TaskConstMeta(
-    debugName: "Engine_save",
+  TaskConstMeta get kCrateApiEngineSaveSnapshotConstMeta => const TaskConstMeta(
+    debugName: "Engine_save_snapshot",
+    argNames: ["that", "handle"],
+  );
+
+  @override
+  Future<String> crateApiEngineStageFile({
+    required Engine that,
+    required String name,
+    required List<int> bytes,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_String(name, serializer);
+          sse_encode_list_prim_u_8_loose(bytes, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineStageFileConstMeta,
+        argValues: [that, name, bytes],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineStageFileConstMeta => const TaskConstMeta(
+    debugName: "Engine_stage_file",
+    argNames: ["that", "name", "bytes"],
+  );
+
+  @override
+  Future<DocumentStatus> crateApiEngineStatus({
+    required Engine that,
+    required int handle,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_u_32(handle, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_document_status,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEngineStatusConstMeta,
+        argValues: [that, handle],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEngineStatusConstMeta => const TaskConstMeta(
+    debugName: "Engine_status",
     argNames: ["that", "handle"],
   );
 
@@ -426,9 +740,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
+  DocumentStatus dco_decode_document_status(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return DocumentStatus(
+      pageCount: dco_decode_u_32(arr[0]),
+      dirty: dco_decode_bool(arr[1]),
+      editable: dco_decode_bool(arr[2]),
+      canUndo: dco_decode_String(arr[3]),
+      canRedo: dco_decode_String(arr[4]),
+    );
+  }
+
+  @protected
   double dco_decode_f_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
+  }
+
+  @protected
+  List<OperationContent> dco_decode_list_operation_content(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_operation_content).toList();
+  }
+
+  @protected
+  List<OperationInfo> dco_decode_list_operation_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_operation_info).toList();
   }
 
   @protected
@@ -441,6 +788,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  OperationContent dco_decode_operation_content(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return OperationContent(
+      json: dco_decode_String(arr[0]),
+      png: dco_decode_list_prim_u_8_strict(arr[1]),
+      width: dco_decode_u_32(arr[2]),
+      height: dco_decode_u_32(arr[3]),
+    );
+  }
+
+  @protected
+  OperationInfo dco_decode_operation_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return OperationInfo(
+      id: dco_decode_String(arr[0]),
+      title: dco_decode_String(arr[1]),
+      description: dco_decode_String(arr[2]),
+      inputSchemaJson: dco_decode_String(arr[3]),
+      readOnly: dco_decode_bool(arr[4]),
+      destructive: dco_decode_bool(arr[5]),
+      commandId: dco_decode_String(arr[6]),
+      requiresDocument: dco_decode_bool(arr[7]),
+    );
+  }
+
+  @protected
+  OperationResponse dco_decode_operation_response(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return OperationResponse(
+      contents: dco_decode_list_operation_content(arr[0]),
+      status: dco_decode_document_status(arr[1]),
+    );
   }
 
   @protected
@@ -458,6 +849,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return PageSize(
       width: dco_decode_f_32(arr[0]),
       height: dco_decode_f_32(arr[1]),
+    );
+  }
+
+  @protected
+  SaveSnapshot dco_decode_save_snapshot(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return SaveSnapshot(
+      token: dco_decode_u_32(arr[0]),
+      bytes: dco_decode_list_prim_u_8_strict(arr[1]),
     );
   }
 
@@ -529,9 +932,60 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  DocumentStatus sse_decode_document_status(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_pageCount = sse_decode_u_32(deserializer);
+    var var_dirty = sse_decode_bool(deserializer);
+    var var_editable = sse_decode_bool(deserializer);
+    var var_canUndo = sse_decode_String(deserializer);
+    var var_canRedo = sse_decode_String(deserializer);
+    return DocumentStatus(
+      pageCount: var_pageCount,
+      dirty: var_dirty,
+      editable: var_editable,
+      canUndo: var_canUndo,
+      canRedo: var_canRedo,
+    );
+  }
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getFloat32();
+  }
+
+  @protected
+  List<OperationContent> sse_decode_list_operation_content(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <OperationContent>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_operation_content(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<OperationInfo> sse_decode_list_operation_info(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <OperationInfo>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_operation_info(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -546,6 +1000,54 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  OperationContent sse_decode_operation_content(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_json = sse_decode_String(deserializer);
+    var var_png = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_width = sse_decode_u_32(deserializer);
+    var var_height = sse_decode_u_32(deserializer);
+    return OperationContent(
+      json: var_json,
+      png: var_png,
+      width: var_width,
+      height: var_height,
+    );
+  }
+
+  @protected
+  OperationInfo sse_decode_operation_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_description = sse_decode_String(deserializer);
+    var var_inputSchemaJson = sse_decode_String(deserializer);
+    var var_readOnly = sse_decode_bool(deserializer);
+    var var_destructive = sse_decode_bool(deserializer);
+    var var_commandId = sse_decode_String(deserializer);
+    var var_requiresDocument = sse_decode_bool(deserializer);
+    return OperationInfo(
+      id: var_id,
+      title: var_title,
+      description: var_description,
+      inputSchemaJson: var_inputSchemaJson,
+      readOnly: var_readOnly,
+      destructive: var_destructive,
+      commandId: var_commandId,
+      requiresDocument: var_requiresDocument,
+    );
+  }
+
+  @protected
+  OperationResponse sse_decode_operation_response(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_contents = sse_decode_list_operation_content(deserializer);
+    var var_status = sse_decode_document_status(deserializer);
+    return OperationResponse(contents: var_contents, status: var_status);
   }
 
   @protected
@@ -565,6 +1067,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_width = sse_decode_f_32(deserializer);
     var var_height = sse_decode_f_32(deserializer);
     return PageSize(width: var_width, height: var_height);
+  }
+
+  @protected
+  SaveSnapshot sse_decode_save_snapshot(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_token = sse_decode_u_32(deserializer);
+    var var_bytes = sse_decode_list_prim_u_8_strict(deserializer);
+    return SaveSnapshot(token: var_token, bytes: var_bytes);
   }
 
   @protected
@@ -594,12 +1104,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
-  }
-
-  @protected
-  bool sse_decode_bool(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getUint8() != 0;
   }
 
   @protected
@@ -648,9 +1152,52 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_document_status(
+    DocumentStatus self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.pageCount, serializer);
+    sse_encode_bool(self.dirty, serializer);
+    sse_encode_bool(self.editable, serializer);
+    sse_encode_String(self.canUndo, serializer);
+    sse_encode_String(self.canRedo, serializer);
+  }
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putFloat32(self);
+  }
+
+  @protected
+  void sse_encode_list_operation_content(
+    List<OperationContent> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_operation_content(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_operation_info(
+    List<OperationInfo> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_operation_info(item, serializer);
+    }
   }
 
   @protected
@@ -676,6 +1223,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_operation_content(
+    OperationContent self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.json, serializer);
+    sse_encode_list_prim_u_8_strict(self.png, serializer);
+    sse_encode_u_32(self.width, serializer);
+    sse_encode_u_32(self.height, serializer);
+  }
+
+  @protected
+  void sse_encode_operation_info(OperationInfo self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_String(self.description, serializer);
+    sse_encode_String(self.inputSchemaJson, serializer);
+    sse_encode_bool(self.readOnly, serializer);
+    sse_encode_bool(self.destructive, serializer);
+    sse_encode_String(self.commandId, serializer);
+    sse_encode_bool(self.requiresDocument, serializer);
+  }
+
+  @protected
+  void sse_encode_operation_response(
+    OperationResponse self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_operation_content(self.contents, serializer);
+    sse_encode_document_status(self.status, serializer);
+  }
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -690,6 +1272,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_f_32(self.width, serializer);
     sse_encode_f_32(self.height, serializer);
+  }
+
+  @protected
+  void sse_encode_save_snapshot(SaveSnapshot self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.token, serializer);
+    sse_encode_list_prim_u_8_strict(self.bytes, serializer);
   }
 
   @protected
@@ -720,12 +1309,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
   }
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putUint8(self ? 1 : 0);
-  }
 }
 
 @sealed
@@ -747,13 +1330,36 @@ class EngineImpl extends RustOpaque implements Engine {
         RustLib.instance.api.rust_arc_decrement_strong_count_EnginePtr,
   );
 
-  /// Drop the document locally. (The engine session keeps its parsed state until process end;
-  /// a session-level close is future work.)
-  Future<void> close({required int handle}) =>
-      RustLib.instance.api.crateApiEngineClose(that: this, handle: handle);
+  Future<void> cancelSave({required int handle, required int token}) => RustLib
+      .instance
+      .api
+      .crateApiEngineCancelSave(that: this, handle: handle, token: token);
 
-  /// Open a PDF (`name` is used for titles/labels; `password` for encrypted documents).
-  /// Returns a document handle.
+  Future<void> close({required int handle, required bool discardChanges}) =>
+      RustLib.instance.api.crateApiEngineClose(
+        that: this,
+        handle: handle,
+        discardChanges: discardChanges,
+      );
+
+  /// Mark a save complete only if the document has not changed since its byte snapshot.
+  Future<void> commitSave({required int handle, required int token}) => RustLib
+      .instance
+      .api
+      .crateApiEngineCommitSave(that: this, handle: handle, token: token);
+
+  /// Invoke one schema-validated upstream automation tool for the open document.
+  Future<OperationResponse> executeTool({
+    required int handle,
+    required String tool,
+    required String argumentsJson,
+  }) => RustLib.instance.api.crateApiEngineExecuteTool(
+    that: this,
+    handle: handle,
+    tool: tool,
+    argumentsJson: argumentsJson,
+  );
+
   Future<int> open({
     required String name,
     required List<int> bytes,
@@ -765,6 +1371,9 @@ class EngineImpl extends RustOpaque implements Engine {
     password: password,
   );
 
+  Future<List<OperationInfo>> operationCatalog() =>
+      RustLib.instance.api.crateApiEngineOperationCatalog(that: this);
+
   Future<int> pageCount({required int handle}) =>
       RustLib.instance.api.crateApiEnginePageCount(that: this, handle: handle);
 
@@ -775,8 +1384,10 @@ class EngineImpl extends RustOpaque implements Engine {
         page1Based: page1Based,
       );
 
-  /// Render one page (1-based) to PNG at `dpi`. The render itself runs on the worker thread;
-  /// the engine's renderer is panic-guarded and never aborts the process.
+  /// Read an output path returned by an upstream tool, confined to this app's workspace.
+  Future<Uint8List> readOutput({required String path}) =>
+      RustLib.instance.api.crateApiEngineReadOutput(that: this, path: path);
+
   Future<Uint8List> renderPagePng({
     required int handle,
     required int page1Based,
@@ -788,8 +1399,20 @@ class EngineImpl extends RustOpaque implements Engine {
     dpi: dpi,
   );
 
-  /// The working file the engine would save right now (incremental write over the original
-  /// bytes; unsaved edits are included).
-  Future<Uint8List> save({required int handle}) =>
-      RustLib.instance.api.crateApiEngineSave(that: this, handle: handle);
+  Future<SaveSnapshot> saveSnapshot({required int handle}) => RustLib
+      .instance
+      .api
+      .crateApiEngineSaveSnapshot(that: this, handle: handle);
+
+  /// Copy a user-selected supporting file into the confined mobile workspace. The returned
+  /// relative path can be passed to upstream tools that accept an image/data-file path.
+  Future<String> stageFile({required String name, required List<int> bytes}) =>
+      RustLib.instance.api.crateApiEngineStageFile(
+        that: this,
+        name: name,
+        bytes: bytes,
+      );
+
+  Future<DocumentStatus> status({required int handle}) =>
+      RustLib.instance.api.crateApiEngineStatus(that: this, handle: handle);
 }
