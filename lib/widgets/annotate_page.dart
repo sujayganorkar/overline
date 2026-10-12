@@ -3,11 +3,13 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart' as geo;
+import 'page_viewport.dart';
 
 enum AnnotateMode {
   ink,
@@ -18,6 +20,8 @@ enum AnnotateMode {
   note,
   text,
   addText,
+  stamp,
+  image,
   redact,
   measure,
   select,
@@ -57,6 +61,17 @@ List<List<double>> selectionQuads(
   return quads;
 }
 
+List<double> _lineQuad(List<double> rect) => [
+  rect[0],
+  rect[1],
+  rect[2],
+  rect[1],
+  rect[0],
+  rect[3],
+  rect[2],
+  rect[3],
+];
+
 class AnnotatePage extends StatefulWidget {
   const AnnotatePage({
     super.key,
@@ -67,6 +82,7 @@ class AnnotatePage extends StatefulWidget {
     required this.imageWidthPx,
     required this.imageHeightPx,
     required this.dpi,
+    this.initialMode = AnnotateMode.ink,
   });
 
   final PdfEngineApi engine;
@@ -76,6 +92,7 @@ class AnnotatePage extends StatefulWidget {
   final double imageWidthPx;
   final double imageHeightPx;
   final int dpi;
+  final AnnotateMode initialMode;
 
   @override
   State<AnnotatePage> createState() => _AnnotatePageState();
@@ -105,29 +122,131 @@ class _AnnotatePageState extends State<AnnotatePage> {
   List<TextLineBox> _textLines = const [];
   bool _linesLoading = false;
   String _selectKind = 'highlight';
+  int? _selectionAnchorLine;
+  int? _selectionExtentLine;
+
+  bool get _dedicatedMode =>
+      widget.initialMode == AnnotateMode.note ||
+      widget.initialMode == AnnotateMode.select;
+
+  /// Open variant strip: shapes or the overflow tools. Only one at a time.
+  String? _variantStrip;
+
+  static const _shapeModes = [
+    AnnotateMode.line,
+    AnnotateMode.arrow,
+    AnnotateMode.rectangle,
+    AnnotateMode.oval,
+  ];
+
+  static const _overflowModes = [
+    AnnotateMode.addText,
+    AnnotateMode.stamp,
+    AnnotateMode.image,
+    AnnotateMode.redact,
+    AnnotateMode.link,
+  ];
+
+  bool get _inShapes => _shapeModes.contains(_mode);
+
+  bool get _inOverflow => _overflowModes.contains(_mode);
+
+  void _pickTool(AnnotateMode mode) {
+    setState(() {
+      _mode = mode;
+      _variantStrip = null;
+      if (mode == AnnotateMode.select) _ensureTextLines();
+    });
+  }
+
+  void _pickShape(AnnotateMode mode) {
+    setState(() {
+      _mode = mode;
+      if (mode == AnnotateMode.select) _ensureTextLines();
+    });
+  }
+
+  String _shapeLabel(AnnotateMode mode) => switch (mode) {
+    AnnotateMode.line => 'Line',
+    AnnotateMode.arrow => 'Arrow',
+    AnnotateMode.oval => 'Oval',
+    _ => 'Rect',
+  };
+
+  IconData _shapeIcon(AnnotateMode mode) => switch (mode) {
+    AnnotateMode.line => Icons.remove,
+    AnnotateMode.arrow => Icons.arrow_forward,
+    AnnotateMode.oval => Icons.circle_outlined,
+    _ => Icons.rectangle_outlined,
+  };
+
+  String _overflowLabel(AnnotateMode mode) => switch (mode) {
+    AnnotateMode.addText => 'Page text',
+    AnnotateMode.stamp => 'Stamp',
+    AnnotateMode.image => 'Picture',
+    AnnotateMode.redact => 'Redact',
+    _ => 'Link',
+  };
+
+  IconData _overflowIcon(AnnotateMode mode) => switch (mode) {
+    AnnotateMode.addText => Icons.title_outlined,
+    AnnotateMode.stamp => Icons.approval_outlined,
+    AnnotateMode.image => Icons.image_outlined,
+    AnnotateMode.redact => Icons.visibility_off_outlined,
+    _ => Icons.link_outlined,
+  };
 
   static const _tapModes = {
     AnnotateMode.note,
     AnnotateMode.text,
     AnnotateMode.addText,
+    AnnotateMode.stamp,
+    AnnotateMode.image,
   };
+
+  static const _standardStamps = [
+    'approved',
+    'completed',
+    'confidential',
+    'draft',
+    'final',
+    'for comment',
+    'for public release',
+    'information only',
+    'not approved',
+    'not for public release',
+    'preliminary results',
+    'void',
+    'accepted',
+    'initial here',
+    'rejected',
+    'sign here',
+    'witness',
+  ];
 
   @override
   void initState() {
     super.initState();
+    _mode = widget.initialMode;
     ui.decodeImageFromList(widget.png, (image) {
       if (mounted) setState(() => _baseImage = image);
     });
+    if (_mode == AnnotateMode.select) _ensureTextLines();
   }
 
   static const _colors = ['red', 'yellow', 'green', 'blue', 'black'];
   static const _widths = [1.0, 2.0, 4.0, 8.0];
 
-  void _onPanStart(DragStartDetails details, BuildContext paintContext) {
-    if (_tapModes.contains(_mode)) return;
+  void _onPanStart(
+    DragStartDetails details,
+    BuildContext paintContext,
+    double fitScale,
+  ) {
+    if (_tapModes.contains(_mode) || _mode == AnnotateMode.select) return;
     if (_mode == AnnotateMode.measure) return;
     final box = paintContext.findRenderObject()! as RenderBox;
-    final local = box.globalToLocal(details.globalPosition);
+    final display = box.globalToLocal(details.globalPosition);
+    final local = Offset(display.dx / fitScale, display.dy / fitScale);
     setState(() {
       if (_mode == AnnotateMode.ink) {
         _currentStroke = [local];
@@ -137,9 +256,15 @@ class _AnnotatePageState extends State<AnnotatePage> {
     });
   }
 
-  void _onTapDown(TapDownDetails details, BuildContext paintContext) {
+  void _onTapDown(
+    TapDownDetails details,
+    BuildContext paintContext,
+    double fitScale,
+  ) {
+    if (_mode == AnnotateMode.select) return;
     final box = paintContext.findRenderObject()! as RenderBox;
-    final at = box.globalToLocal(details.globalPosition);
+    final display = box.globalToLocal(details.globalPosition);
+    final at = Offset(display.dx / fitScale, display.dy / fitScale);
     switch (_mode) {
       case AnnotateMode.note:
         _placeNote(at);
@@ -147,6 +272,10 @@ class _AnnotatePageState extends State<AnnotatePage> {
         _placeFillText(at);
       case AnnotateMode.addText:
         _placePageText(at);
+      case AnnotateMode.stamp:
+        _placeStamp(at);
+      case AnnotateMode.image:
+        _placeImage(at);
       case AnnotateMode.measure:
         setState(() => _measurePoints.add(at));
       case AnnotateMode.select:
@@ -162,9 +291,111 @@ class _AnnotatePageState extends State<AnnotatePage> {
     }
   }
 
-  void _onPanUpdate(DragUpdateDetails details, BuildContext paintContext) {
+  int? _nearestTextLine(Offset sourcePixels) {
+    var bestIndex = -1;
+    var bestDistance = double.infinity;
+    for (var index = 0; index < _textLines.length; index++) {
+      final rect = _lineRectPixels(_textLines[index]);
+      final dx = sourcePixels.dx < rect.left
+          ? rect.left - sourcePixels.dx
+          : sourcePixels.dx > rect.right
+          ? sourcePixels.dx - rect.right
+          : 0.0;
+      final dy = sourcePixels.dy < rect.top
+          ? rect.top - sourcePixels.dy
+          : sourcePixels.dy > rect.bottom
+          ? sourcePixels.dy - rect.bottom
+          : 0.0;
+      final distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    return bestIndex >= 0 && bestDistance <= 84 * 84 ? bestIndex : null;
+  }
+
+  Rect _lineRectPixels(TextLineBox line) => Rect.fromLTRB(
+    geo.ptToPx(line.rect[0], widget.dpi),
+    geo.ptToPx(line.rect[1], widget.dpi),
+    geo.ptToPx(line.rect[2], widget.dpi),
+    geo.ptToPx(line.rect[3], widget.dpi),
+  );
+
+  List<Rect> _selectedLineRects() {
+    final anchor = _selectionAnchorLine;
+    final extent = _selectionExtentLine;
+    if (anchor == null || extent == null || _textLines.isEmpty) return const [];
+    final start = math.min(anchor, extent);
+    final end = math.max(anchor, extent);
+    return [
+      for (var index = start; index <= end; index++)
+        _lineRectPixels(_textLines[index]),
+    ];
+  }
+
+  void _startTextSelection(LongPressStartDetails details, double fitScale) {
+    if (_mode != AnnotateMode.select || _linesLoading) return;
+    final point = Offset(
+      details.localPosition.dx / fitScale,
+      details.localPosition.dy / fitScale,
+    );
+    final line = _nearestTextLine(point);
+    if (line == null) {
+      setState(() => _error = 'Press on selectable text to start a selection.');
+      return;
+    }
+    setState(() {
+      _selectionAnchorLine = line;
+      _selectionExtentLine = line;
+      _error = null;
+    });
+  }
+
+  void _extendTextSelection(
+    LongPressMoveUpdateDetails details,
+    double fitScale,
+  ) {
+    if (_mode != AnnotateMode.select || _selectionAnchorLine == null) return;
+    final point = Offset(
+      details.localPosition.dx / fitScale,
+      details.localPosition.dy / fitScale,
+    );
+    final line = _nearestTextLine(point);
+    if (line != null) setState(() => _selectionExtentLine = line);
+  }
+
+  void _moveSelectionHandle({
+    required DragUpdateDetails details,
+    required BuildContext paintContext,
+    required double fitScale,
+    required bool anchor,
+  }) {
+    final box = paintContext.findRenderObject();
+    if (box is! RenderBox) return;
+    final display = box.globalToLocal(details.globalPosition);
+    final line = _nearestTextLine(
+      Offset(display.dx / fitScale, display.dy / fitScale),
+    );
+    if (line == null) return;
+    setState(() {
+      if (anchor) {
+        _selectionAnchorLine = line;
+      } else {
+        _selectionExtentLine = line;
+      }
+    });
+  }
+
+  void _onPanUpdate(
+    DragUpdateDetails details,
+    BuildContext paintContext,
+    double fitScale,
+  ) {
+    if (_mode == AnnotateMode.select) return;
     final box = paintContext.findRenderObject()! as RenderBox;
-    final local = box.globalToLocal(details.globalPosition);
+    final display = box.globalToLocal(details.globalPosition);
+    final local = Offset(display.dx / fitScale, display.dy / fitScale);
     setState(() {
       if (_mode == AnnotateMode.ink) {
         _currentStroke = [..._currentStroke, local];
@@ -198,7 +429,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
       final contents = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Sticky note'),
+          title: const Text('Add a note'),
           content: TextField(
             controller: controller,
             autofocus: true,
@@ -212,7 +443,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Add'),
+              child: const Text('Add note'),
             ),
           ],
         ),
@@ -299,6 +530,73 @@ class _AnnotatePageState extends State<AnnotatePage> {
       }, tool: 'page_add_text');
     } finally {
       controller.dispose();
+    }
+  }
+
+  Future<void> _placeStamp(Offset at) async {
+    final stamp = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final name in _standardStamps)
+              ListTile(
+                title: Text(
+                  name.replaceAllMapped(
+                    RegExp(r'\b[a-z]'),
+                    (m) => m.group(0)!.toUpperCase(),
+                  ),
+                ),
+                onTap: () => Navigator.pop(context, name),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (stamp == null || !mounted) return;
+    await _execute({
+      'page': widget.page,
+      'type': 'stamp',
+      'stamp': stamp,
+      'at': [geo.pxToPt(at.dx, widget.dpi), geo.pxToPt(at.dy, widget.dpi)],
+    });
+  }
+
+  Future<void> _placeImage(Offset at) async {
+    final picked = await FilePickerPlatform.instance.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'gif', 'bmp'],
+      dialogTitle: 'Choose a picture to place',
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final file = picked.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) throw StateError('${file.name} is empty');
+      final staged = await widget.engine.stageFile(
+        name: 'stamp-${file.name}',
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      final x = geo.pxToPt(at.dx, widget.dpi);
+      final y = geo.pxToPt(at.dy, widget.dpi);
+      await _execute({
+        'page': widget.page,
+        'path': staged,
+        'rect': [x - 100, y - 75, x + 100, y + 75],
+      }, tool: 'page_add_image');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not place the picture: $e';
+        _saving = false;
+      });
     }
   }
 
@@ -457,22 +755,38 @@ class _AnnotatePageState extends State<AnnotatePage> {
   }
 
   Future<void> _saveSelection() async {
-    final shape = _latestShape();
-    if (shape == null || _textLines.isEmpty) {
-      if (_textLines.isEmpty && !_linesLoading) {
-        setState(() => _error = 'No text lines on this page to select');
+    if (_textLines.isEmpty) {
+      if (!_linesLoading) {
+        setState(() => _error = 'No selectable text on this page.');
       }
       return;
     }
-    final quads = selectionQuads(
-      _textLines,
-      geo.pxToPt(shape.start.dx, widget.dpi),
-      geo.pxToPt(shape.start.dy, widget.dpi),
-      geo.pxToPt(shape.end.dx, widget.dpi),
-      geo.pxToPt(shape.end.dy, widget.dpi),
-    );
+    final anchor = _selectionAnchorLine;
+    final extent = _selectionExtentLine;
+    final shape = _latestShape();
+    final quads = anchor != null && extent != null
+        ? [
+            for (
+              var index = math.min(anchor, extent);
+              index <= math.max(anchor, extent);
+              index++
+            )
+              if (_textLines[index].rect.length == 4)
+                _lineQuad(_textLines[index].rect),
+          ]
+        : shape == null
+        ? const <List<double>>[]
+        : selectionQuads(
+            _textLines,
+            geo.pxToPt(shape.start.dx, widget.dpi),
+            geo.pxToPt(shape.start.dy, widget.dpi),
+            geo.pxToPt(shape.end.dx, widget.dpi),
+            geo.pxToPt(shape.end.dy, widget.dpi),
+          );
     if (quads.isEmpty) {
-      setState(() => _error = 'Drag over text to select it');
+      setState(
+        () => _error = 'Touch and hold text, then drag to extend selection.',
+      );
       return;
     }
     await _execute({'page': widget.page, 'type': _selectKind, 'quads': quads});
@@ -533,16 +847,32 @@ class _AnnotatePageState extends State<AnnotatePage> {
       ],
     }, tool: tool);
     if (response != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Measurement saved as annotation')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_measureSummary(response))));
       setState(() => _measurePoints.clear());
     }
   }
 
+  String _measureSummary(bridge.OperationResponse response) {
+    for (final content in response.contents) {
+      if (content.json.isEmpty) continue;
+      try {
+        final data = jsonDecode(content.json);
+        if (data is Map<String, dynamic>) {
+          final value = data['value'] ?? data['distance'] ?? data['area'];
+          final unit = data['unit'];
+          if (value != null) {
+            return 'Measured $value${unit is String && unit.isNotEmpty ? ' $unit' : ''} — kept as an annotation.';
+          }
+        }
+      } catch (_) {}
+    }
+    return 'Measurement saved as annotation.';
+  }
+
   /// Runs a tool but stays on the overlay (used when the result is shown
   /// inline rather than by returning to the viewer).
-  Future<bridge.DocumentStatus?> _executeAndStay(
+  Future<bridge.OperationResponse?> _executeAndStay(
     Map<String, Object?> args, {
     String tool = 'comment_add',
   }) async {
@@ -551,12 +881,11 @@ class _AnnotatePageState extends State<AnnotatePage> {
       _error = null;
     });
     try {
-      final response = await widget.engine.executeTool(
+      return await widget.engine.executeTool(
         handle: widget.handle,
         tool: tool,
         argumentsJson: geo.encodeArgs(args),
       );
-      return response.status;
     } catch (e) {
       if (!mounted) return null;
       setState(() => _error = '$e');
@@ -577,7 +906,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
     try {
       final response = await widget.engine.executeTool(
         handle: widget.handle,
-        tool: 'comment_add',
+        tool: tool,
         argumentsJson: geo.encodeArgs(args),
       );
       if (!mounted) return;
@@ -590,11 +919,127 @@ class _AnnotatePageState extends State<AnnotatePage> {
     }
   }
 
+  /// Thumb-first tool clusters: the five everyday tools stay visible and
+  /// shapes/overflow live one tap deeper instead of twelve scrolling chips.
+  Widget _toolClusters() {
+    Widget cluster({
+      required String label,
+      required IconData icon,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: ChoiceChip(
+          label: Text(label),
+          avatar: Icon(icon, size: 16),
+          selected: selected,
+          onSelected: (_) => onTap(),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          cluster(
+            label: 'Draw',
+            icon: Icons.brush,
+            selected: _mode == AnnotateMode.ink,
+            onTap: () => _pickTool(AnnotateMode.ink),
+          ),
+          cluster(
+            label: 'Mark',
+            icon: Icons.highlight_outlined,
+            selected: _mode == AnnotateMode.select,
+            onTap: () => _pickTool(AnnotateMode.select),
+          ),
+          cluster(
+            label: 'Note',
+            icon: Icons.sticky_note_2_outlined,
+            selected: _mode == AnnotateMode.note,
+            onTap: () => _pickTool(AnnotateMode.note),
+          ),
+          cluster(
+            label: 'Text',
+            icon: Icons.text_fields_outlined,
+            selected: _mode == AnnotateMode.text,
+            onTap: () => _pickTool(AnnotateMode.text),
+          ),
+          cluster(
+            label: _inShapes ? _shapeLabel(_mode) : 'Shape',
+            icon: _inShapes ? _shapeIcon(_mode) : Icons.interests_outlined,
+            selected: _inShapes,
+            onTap: () {
+              if (!_inShapes) _pickShape(AnnotateMode.rectangle);
+              setState(() {
+                _variantStrip = _variantStrip == 'shapes' ? null : 'shapes';
+              });
+            },
+          ),
+          cluster(
+            label: 'Measure',
+            icon: Icons.straighten_outlined,
+            selected: _mode == AnnotateMode.measure,
+            onTap: () => _pickTool(AnnotateMode.measure),
+          ),
+          cluster(
+            label: 'More',
+            icon: Icons.more_horiz,
+            selected: _inOverflow,
+            onTap: () => setState(() {
+              _variantStrip = _variantStrip == 'more' ? null : 'more';
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _variantStripRow({
+    required List<AnnotateMode> modes,
+    required AnnotateMode? selected,
+    required String Function(AnnotateMode) label,
+    required IconData Function(AnnotateMode) icon,
+    required ValueChanged<AnnotateMode> onPick,
+  }) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: Row(
+        children: [
+          for (final mode in modes)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ChoiceChip(
+                label: Text(label(mode)),
+                avatar: Icon(icon(mode), size: 16),
+                selected: selected == mode,
+                onSelected: (_) => onPick(mode),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Annotate page ${widget.page}'),
+        title: Text(
+          _mode == AnnotateMode.select
+              ? 'Select text · page ${widget.page}'
+              : _mode == AnnotateMode.note
+              ? 'Add a note · page ${widget.page}'
+              : _mode == AnnotateMode.stamp
+              ? 'Place a stamp · page ${widget.page}'
+              : _mode == AnnotateMode.image
+              ? 'Place a picture · page ${widget.page}'
+              : 'Annotate page ${widget.page}',
+        ),
         actions: [
           if (!_tapModes.contains(_mode))
             TextButton(
@@ -605,41 +1050,65 @@ class _AnnotatePageState extends State<AnnotatePage> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Save'),
+                  : Text(
+                      _mode == AnnotateMode.select
+                          ? 'Highlight selection'
+                          : 'Save',
+                    ),
             ),
         ],
       ),
       body: Column(
         children: [
-          _ModeBar(
-            mode: _mode,
-            onChanged: (mode) {
-              setState(() => _mode = mode);
-              if (mode == AnnotateMode.select) _ensureTextLines();
-            },
-          ),
-          _StyleBar(
-            color: _color,
-            width: _width,
-            colors: _colors,
-            widths: _widths,
-            onColor: (c) => setState(() => _color = c),
-            onWidth: (w) => setState(() => _width = w),
-            onUndo: () => setState(() {
-              if (_measurePoints.isNotEmpty && _mode == AnnotateMode.measure) {
-                _measurePoints.removeLast();
-              } else if (_strokes.isNotEmpty) {
-                _strokes.removeLast();
-              } else if (_shapes.isNotEmpty) {
-                _shapes.removeLast();
-              }
-            }),
-            onClear: () => setState(() {
-              _strokes.clear();
-              _shapes.clear();
-              _measurePoints.clear();
-            }),
-          ),
+          if (!_dedicatedMode) _toolClusters(),
+          if (!_dedicatedMode && _variantStrip == 'shapes')
+            _variantStripRow(
+              modes: _shapeModes,
+              selected: _inShapes ? _mode : null,
+              label: _shapeLabel,
+              icon: _shapeIcon,
+              onPick: _pickShape,
+            ),
+          if (!_dedicatedMode && _variantStrip == 'more')
+            _variantStripRow(
+              modes: _overflowModes,
+              selected: _inOverflow ? _mode : null,
+              label: _overflowLabel,
+              icon: _overflowIcon,
+              onPick: _pickTool,
+            ),
+          if (_mode != AnnotateMode.select &&
+              _mode != AnnotateMode.note &&
+              _mode != AnnotateMode.stamp &&
+              _mode != AnnotateMode.image)
+            _StyleBar(
+              color: _color,
+              width: _width,
+              colors: _colors,
+              widths: _widths,
+              onColor: (c) => setState(() => _color = c),
+              onWidth: (w) => setState(() => _width = w),
+              onUndo: () => setState(() {
+                if (_mode == AnnotateMode.select) {
+                  _selectionAnchorLine = null;
+                  _selectionExtentLine = null;
+                } else if (_measurePoints.isNotEmpty &&
+                    _mode == AnnotateMode.measure) {
+                  _measurePoints.removeLast();
+                } else if (_strokes.isNotEmpty) {
+                  _strokes.removeLast();
+                } else if (_shapes.isNotEmpty) {
+                  _shapes.removeLast();
+                }
+              }),
+              onClear: () => setState(() {
+                _strokes.clear();
+                _shapes.clear();
+                _measurePoints.clear();
+                _selectionAnchorLine = null;
+                _selectionExtentLine = null;
+              }),
+            ),
           if (_mode == AnnotateMode.select)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -675,11 +1144,35 @@ class _AnnotatePageState extends State<AnnotatePage> {
                   Text(
                     _linesLoading
                         ? 'Loading text…'
-                        : '${_textLines.length} lines',
+                        : _selectionAnchorLine == null
+                        ? 'Touch and hold a word, then drag'
+                        : '${_selectedLineRects().length} lines selected',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
+            ),
+          if (_mode == AnnotateMode.select)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Text(
+                'Hold a word and drag to extend. Move either handle to adjust; yellow lines are the preview.',
+              ),
+            ),
+          if (_mode == AnnotateMode.note)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Text('Tap where the note belongs. Write it, then Add.'),
+            ),
+          if (_mode == AnnotateMode.stamp)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Text('Tap where the stamp belongs, then choose it.'),
+            ),
+          if (_mode == AnnotateMode.image)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Text('Tap where the picture belongs, then choose it.'),
             ),
           if (_mode == AnnotateMode.measure)
             Padding(
@@ -736,94 +1229,146 @@ class _AnnotatePageState extends State<AnnotatePage> {
           Expanded(
             child: _baseImage == null
                 ? const Center(child: CircularProgressIndicator())
-                : InteractiveViewer(
-                    maxScale: 8,
-                    child: Center(
-                      child: Builder(
-                        builder: (paintContext) => GestureDetector(
-                          onTapDown: (d) => _onTapDown(d, paintContext),
-                          onPanStart: (d) => _onPanStart(d, paintContext),
-                          onPanUpdate: (d) => _onPanUpdate(d, paintContext),
-                          onPanEnd: (_) => _onPanEnd(),
-                          child: CustomPaint(
-                            size: Size(
-                              widget.imageWidthPx,
-                              widget.imageHeightPx,
-                            ),
-                            painter: _DraftPainter(
-                              baseImage: _baseImage!,
-                              strokes: _strokes,
-                              currentStroke: _currentStroke,
-                              shapes: _shapes,
-                              measurePoints: _measurePoints,
-                              textLinesPx: [
-                                for (final line in _textLines)
-                                  if (line.rect.length == 4)
-                                    Rect.fromLTRB(
-                                      geo.ptToPx(line.rect[0], widget.dpi),
-                                      geo.ptToPx(line.rect[1], widget.dpi),
-                                      geo.ptToPx(line.rect[2], widget.dpi),
-                                      geo.ptToPx(line.rect[3], widget.dpi),
-                                    ),
-                              ],
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final fitScale = fitPageScale(
+                        viewportWidth: constraints.maxWidth,
+                        viewportHeight: constraints.maxHeight,
+                        pageWidth: widget.imageWidthPx,
+                        pageHeight: widget.imageHeightPx,
+                      );
+                      final pageWidth = widget.imageWidthPx * fitScale;
+                      final pageHeight = widget.imageHeightPx * fitScale;
+                      return Center(
+                        child: InteractiveViewer(
+                          constrained: false,
+                          minScale: 1,
+                          maxScale: 8,
+                          child: SizedBox(
+                            width: pageWidth,
+                            height: pageHeight,
+                            child: Builder(
+                              builder: (paintContext) {
+                                final start = _selectionAnchorLine;
+                                final extent = _selectionExtentLine;
+                                final firstRect =
+                                    start == null || extent == null
+                                    ? null
+                                    : _lineRectPixels(
+                                        _textLines[math.min(start, extent)],
+                                      );
+                                final lastRect = start == null || extent == null
+                                    ? null
+                                    : _lineRectPixels(
+                                        _textLines[math.max(start, extent)],
+                                      );
+                                Widget handle(Rect rect, bool anchor) =>
+                                    Positioned(
+                                      left:
+                                          (anchor ? rect.left : rect.right) *
+                                              fitScale -
+                                          22,
+                                      top: rect.bottom * fitScale - 22,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onPanUpdate: (details) =>
+                                            _moveSelectionHandle(
+                                              details: details,
+                                              paintContext: paintContext,
+                                              fitScale: fitScale,
+                                              anchor: anchor,
+                                            ),
+                                        child: SizedBox(
+                                          width: 44,
+                                          height: 44,
+                                          child: Center(
+                                            child: Container(
+                                              width: 16,
+                                              height: 16,
+                                              decoration: BoxDecoration(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: Colors.white,
+                                                  width: 2,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                return GestureDetector(
+                                  onTapDown: (details) => _onTapDown(
+                                    details,
+                                    paintContext,
+                                    fitScale,
+                                  ),
+                                  onPanStart: _mode == AnnotateMode.select
+                                      ? null
+                                      : (details) => _onPanStart(
+                                          details,
+                                          paintContext,
+                                          fitScale,
+                                        ),
+                                  onPanUpdate: _mode == AnnotateMode.select
+                                      ? null
+                                      : (details) => _onPanUpdate(
+                                          details,
+                                          paintContext,
+                                          fitScale,
+                                        ),
+                                  onPanEnd: _mode == AnnotateMode.select
+                                      ? null
+                                      : (_) => _onPanEnd(),
+                                  onLongPressStart: _mode == AnnotateMode.select
+                                      ? (details) => _startTextSelection(
+                                          details,
+                                          fitScale,
+                                        )
+                                      : null,
+                                  onLongPressMoveUpdate:
+                                      _mode == AnnotateMode.select
+                                      ? (details) => _extendTextSelection(
+                                          details,
+                                          fitScale,
+                                        )
+                                      : null,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      CustomPaint(
+                                        size: Size(pageWidth, pageHeight),
+                                        painter: _DraftPainter(
+                                          baseImage: _baseImage!,
+                                          fitScale: fitScale,
+                                          strokes: _strokes,
+                                          currentStroke: _currentStroke,
+                                          shapes: _shapes,
+                                          measurePoints: _measurePoints,
+                                          selectedLineRectsPx:
+                                              _selectedLineRects(),
+                                        ),
+                                      ),
+                                      if (firstRect != null &&
+                                          lastRect != null) ...[
+                                        handle(firstRect, true),
+                                        handle(lastRect, false),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ModeBar extends StatelessWidget {
-  const _ModeBar({required this.mode, required this.onChanged});
-
-  final AnnotateMode mode;
-  final ValueChanged<AnnotateMode> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget chip(AnnotateMode m, String label, IconData icon) {
-      return ChoiceChip(
-        label: Text(label),
-        avatar: Icon(icon, size: 16),
-        selected: mode == m,
-        onSelected: (_) => onChanged(m),
-      );
-    }
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          chip(AnnotateMode.ink, 'Draw', Icons.brush),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.line, 'Line', Icons.remove),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.arrow, 'Arrow', Icons.arrow_forward),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.rectangle, 'Rect', Icons.rectangle_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.oval, 'Oval', Icons.circle_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.note, 'Note', Icons.sticky_note_2_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.text, 'Text', Icons.text_fields_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.addText, 'AddText', Icons.title_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.redact, 'Redact', Icons.visibility_off_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.measure, 'Measure', Icons.straighten_outlined),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.select, 'Select', Icons.select_all),
-          const SizedBox(width: 6),
-          chip(AnnotateMode.link, 'Link', Icons.link_outlined),
         ],
       ),
     );
@@ -909,19 +1454,21 @@ class _StyleBar extends StatelessWidget {
 class _DraftPainter extends CustomPainter {
   _DraftPainter({
     required this.baseImage,
+    required this.fitScale,
     required this.strokes,
     required this.currentStroke,
     required this.shapes,
     required this.measurePoints,
-    required this.textLinesPx,
+    required this.selectedLineRectsPx,
   });
 
   final ui.Image baseImage;
+  final double fitScale;
   final List<geo.InkStroke> strokes;
   final List<Offset> currentStroke;
   final List<_DraftShape> shapes;
   final List<Offset> measurePoints;
-  final List<Rect> textLinesPx;
+  final List<Rect> selectedLineRectsPx;
 
   static const _swatches = {
     'red': Colors.red,
@@ -933,6 +1480,8 @@ class _DraftPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(fitScale);
     canvas.drawImage(baseImage, Offset.zero, Paint());
     for (final stroke in strokes) {
       _paintStroke(canvas, stroke);
@@ -953,28 +1502,16 @@ class _DraftPainter extends CustomPainter {
     for (final shape in shapes) {
       _paintShape(canvas, shape);
     }
-    for (final shape in shapes) {
-      if (shape.mode != AnnotateMode.select) continue;
-      final box = Rect.fromPoints(shape.start, shape.end);
-      canvas.drawRect(
-        box,
-        Paint()
-          ..color = Colors.blue.withValues(alpha: 0.15)
-          ..style = PaintingStyle.fill,
-      );
-      canvas.drawRect(
-        box,
-        Paint()
-          ..color = Colors.blue
-          ..strokeWidth = 2
-          ..style = PaintingStyle.stroke,
-      );
-      final highlight = Paint()
-        ..color = Colors.yellow.withValues(alpha: 0.4)
-        ..style = PaintingStyle.fill;
-      for (final line in textLinesPx) {
-        if (line.overlaps(box)) canvas.drawRect(line, highlight);
-      }
+    final highlight = Paint()
+      ..color = Colors.yellow.withValues(alpha: 0.42)
+      ..style = PaintingStyle.fill;
+    final edge = Paint()
+      ..color = Colors.amber.shade800
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    for (final line in selectedLineRectsPx) {
+      canvas.drawRect(line, highlight);
+      canvas.drawRect(line, edge);
     }
     if (measurePoints.isNotEmpty) {
       final paint = Paint()
@@ -994,6 +1531,7 @@ class _DraftPainter extends CustomPainter {
         canvas.drawPath(path, paint);
       }
     }
+    canvas.restore();
   }
 
   void _paintStroke(Canvas canvas, geo.InkStroke stroke) {
@@ -1049,6 +1587,8 @@ class _DraftPainter extends CustomPainter {
       case AnnotateMode.note:
       case AnnotateMode.text:
       case AnnotateMode.addText:
+      case AnnotateMode.stamp:
+      case AnnotateMode.image:
       case AnnotateMode.measure:
       case AnnotateMode.select:
       case AnnotateMode.link:

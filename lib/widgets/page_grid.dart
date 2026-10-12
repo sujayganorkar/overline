@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
+import 'crop_page.dart';
 import 'output_saver.dart';
 
 /// Page overview: thumbnails with rotate/duplicate/delete/move actions and
@@ -91,6 +93,66 @@ class _PageGridState extends State<PageGrid> {
     }
   }
 
+  Future<void> _insertMenu() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.note_add_outlined),
+              title: const Text('Blank page at the end'),
+              onTap: () => Navigator.pop(context, 'blank'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Pages from another PDF'),
+              subtitle: Text('Inserted after page ${widget.currentPage}'),
+              onTap: () => Navigator.pop(context, 'file'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'blank') {
+      await _run('page_insert_blank', {
+        'at': _pageCount + 1,
+      }, 'Insert blank page');
+      return;
+    }
+    final picked = await FilePickerPlatform.instance.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+      dialogTitle: 'Choose a PDF to insert',
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final file = picked.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) throw StateError('${file.name} is empty');
+      final staged = await widget.engine.stageFile(
+        name: 'insert-${file.name}',
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      final at = (widget.currentPage + 1).clamp(1, _pageCount + 1);
+      await _run('page_insert_file', {
+        'path': staged,
+        'at': at,
+      }, 'Insert pages');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not insert pages: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _undoLast() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -146,6 +208,12 @@ class _PageGridState extends State<PageGrid> {
               onTap: () => Navigator.pop(context, 'dup'),
             ),
             ListTile(
+              leading: const Icon(Icons.crop_outlined),
+              title: const Text('Crop this page'),
+              subtitle: const Text('Drag the area to keep'),
+              onTap: () => Navigator.pop(context, 'crop'),
+            ),
+            ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('Delete page'),
               onTap: () => Navigator.pop(context, 'delete'),
@@ -170,6 +238,8 @@ class _PageGridState extends State<PageGrid> {
         await _run('page_duplicate', {
           'pages': [page],
         }, 'Duplicate');
+      case 'crop':
+        await _openCrop(page);
       case 'delete':
         if (_pageCount <= 1) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -183,6 +253,103 @@ class _PageGridState extends State<PageGrid> {
             'pages': [page],
           }, 'Delete');
         }
+    }
+  }
+
+  Future<void> _openCrop(int page) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final png = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: page,
+        dpi: 96,
+      );
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CropPage(
+            engine: widget.engine,
+            handle: widget.handle,
+            page: page,
+            pageCount: _pageCount,
+            png: png,
+            onStatusChanged: (status) {
+              _thumbs.clear();
+              widget.onStatusChanged(status);
+              if (mounted) {
+                setState(() {
+                  _pageCount = status.pageCount;
+                  _reorderOrder = List<int>.generate(
+                    _pageCount,
+                    (index) => index + 1,
+                  );
+                });
+              }
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not open crop: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _replaceSelected() async {
+    final pages = _selectedPages.toList()..sort();
+    if (pages.isEmpty || _busy) return;
+    final picked = await FilePickerPlatform.instance.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+      dialogTitle: 'Choose the replacement PDF',
+    );
+    if (picked.isEmpty || !mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Replace ${pages.length} pages?'),
+        content: Text(
+          'Pages ${pages.join(', ')} take content from the start of ${picked.first.name}. This is undoable.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Replace'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final file = picked.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) throw StateError('${file.name} is empty');
+      final staged = await widget.engine.stageFile(
+        name: 'replace-${file.name}',
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      await _run('page_replace', {
+        'pages': pages,
+        'path': staged,
+      }, 'Replace pages');
+      if (mounted) setState(_selectedPages.clear);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not replace pages: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -369,13 +536,9 @@ class _PageGridState extends State<PageGrid> {
                         ),
                       if (!_selecting && !_reordering)
                         TextButton.icon(
-                          onPressed: _busy
-                              ? null
-                              : () => _run('page_insert_blank', {
-                                  'at': _pageCount + 1,
-                                }, 'Insert blank page'),
+                          onPressed: _busy ? null : _insertMenu,
                           icon: const Icon(Icons.add),
-                          label: const Text('Blank'),
+                          label: const Text('Insert'),
                         ),
                       IconButton(
                         onPressed: () => Navigator.pop(context),
@@ -634,6 +797,17 @@ class _PageGridState extends State<PageGrid> {
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 4),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _busy ? null : _replaceSelected,
+                            icon: const Icon(Icons.find_replace_outlined),
+                            label: Text(
+                              'Replace ${_selectedPages.length} with another file',
+                            ),
+                          ),
                         ),
                       ],
                     ),

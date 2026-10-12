@@ -10,13 +10,16 @@ import 'package:share_plus/share_plus.dart';
 
 import 'bridge/api.dart' as bridge;
 import 'services/pdf_engine.dart';
+import 'services/signature_store.dart';
 import 'widgets/annotate_page.dart';
 import 'widgets/agent_command_sheet.dart';
+import 'widgets/annotation_geometry.dart' as annotation_geo;
 import 'widgets/bookmarks_screen.dart';
 import 'widgets/comments_screen.dart';
 import 'widgets/document_heading.dart';
 import 'widgets/document_insights_sheet.dart';
 import 'widgets/export_sheet.dart';
+import 'widgets/links_screen.dart';
 import 'widgets/find_bar.dart';
 import 'widgets/form_screen.dart';
 import 'widgets/organize_sheet.dart';
@@ -29,6 +32,7 @@ import 'widgets/signature_pad.dart';
 import 'widgets/signature_placement_page.dart';
 import 'widgets/signature_sheet.dart';
 import 'widgets/text_edit_sheet.dart';
+import 'widgets/output_saver.dart';
 
 void main() {
   runApp(const PdfCraftApp());
@@ -78,12 +82,21 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   List<_Marker> _markers = const [];
   double? _imageWidthPx;
   double? _imageHeightPx;
+  List<TextLineBox> _pageTextLines = const [];
+  bool _pageTextLoading = false;
+  int? _textSelectionAnchor;
+  int? _textSelectionExtent;
+  String _textSelectionKind = 'highlight';
+  String _textSelectionColor = 'yellow';
   bool _recoveredUnsaved = false;
   bool _recoveryAvailable = false;
   int _activeSurface = 0;
+  static bool _coachShown = false;
   final TransformationController _viewerTransform = TransformationController();
+  final GlobalKey _viewerPageKey = GlobalKey();
   int _viewerPointerCount = 0;
   Offset? _viewerSwipeStart;
+  bool _viewerLongPressSelecting = false;
   Timer? _recoveryDebounce;
   Future<void> _recoveryWrites = Future<void>.value();
 
@@ -286,12 +299,27 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       );
       final pageSize = await engine.pageSize(handle: doc, page1Based: page);
       if (!mounted || _doc != doc || _page != page) return;
+      final firstRender = _png == null;
       setState(() {
         _png = png;
         _imageWidthPx = pageSize.width * 96 / 72;
         _imageHeightPx = pageSize.height * 96 / 72;
-        _status = 'Swipe to turn pages · Pinch to zoom';
+        _markers = const [];
+        _pageTextLines = const [];
+        _pageTextLoading = true;
+        _status = 'Ready';
       });
+      if (firstRender && !_coachShown) {
+        _coachShown = true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Hold text to select it · Swipe to turn pages · Pinch to zoom',
+            ),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
       await _refreshMarkers(engine, doc, page, pageSize: pageSize);
     } catch (e) {
       if (!mounted) return;
@@ -341,7 +369,33 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             _Marker(
               x: x0.clamp(0, widthPx),
               y: y0.clamp(0, heightPx),
-              label: (item['type'] as String?) ?? 'comment',
+              label: _commentMarkerLabel(
+                (item['type'] as String?) ?? 'comment',
+              ),
+              index: (item['index'] as num?)?.toInt() ?? 0,
+            ),
+          );
+        }
+      }
+      final lineResponse = await engine.executeTool(
+        handle: doc,
+        tool: 'text_lines',
+        argumentsJson: jsonEncode({'page': page}),
+      );
+      final pageLines = <TextLineBox>[];
+      for (final content in lineResponse.contents) {
+        if (content.json.isEmpty) continue;
+        final decoded = jsonDecode(content.json);
+        final lines = decoded is Map<String, dynamic> ? decoded['lines'] : null;
+        if (lines is! List) continue;
+        for (final item in lines) {
+          if (item is! Map<String, dynamic>) continue;
+          final rect = item['rect'];
+          if (rect is! List || rect.length != 4) continue;
+          pageLines.add(
+            TextLineBox(
+              text: item['text'] as String? ?? '',
+              rect: [for (final value in rect) (value as num).toDouble()],
             ),
           );
         }
@@ -350,8 +404,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         _imageWidthPx = widthPx;
         _imageHeightPx = heightPx;
         _markers = markers;
+        _pageTextLines = pageLines;
+        _pageTextLoading = false;
       });
     } catch (e) {
+      if (mounted) setState(() => _pageTextLoading = false);
       debugPrint('Could not load comment markers: $e');
     }
   }
@@ -406,6 +463,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   void _onViewerPointerDown(PointerDownEvent event) {
     _viewerPointerCount++;
+    if (_viewerPointerCount == 1) _viewerLongPressSelecting = false;
     _viewerSwipeStart = _viewerPointerCount == 1 ? event.position : null;
   }
 
@@ -414,7 +472,14 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     if (_viewerPointerCount > 0) return;
     final start = _viewerSwipeStart;
     _viewerSwipeStart = null;
-    if (start == null || _busy || _doc == null) return;
+    if (start == null ||
+        _busy ||
+        _doc == null ||
+        _viewerLongPressSelecting ||
+        _textSelectionAnchor != null) {
+      _viewerLongPressSelecting = false;
+      return;
+    }
     final delta = event.position - start;
     final destination = pageForSwipe(
       delta,
@@ -424,6 +489,171 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     );
     if (destination != null) unawaited(_goto(destination));
   }
+
+  void _beginTextSelection(Offset pageLocalPosition, double fitScale) {
+    _viewerLongPressSelecting = true;
+    if (_pageTextLoading) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Getting this page’s text ready…')),
+      );
+      return;
+    }
+    if (_pageTextLines.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This page has no selectable text.')),
+      );
+      return;
+    }
+    final x = annotation_geo.pxToPt(pageLocalPosition.dx / fitScale, 96);
+    final y = annotation_geo.pxToPt(pageLocalPosition.dy / fitScale, 96);
+    final line = _nearestTextLine(x, y);
+    if (line == null) return;
+    setState(() {
+      _textSelectionAnchor = line;
+      _textSelectionExtent = line;
+    });
+  }
+
+  void _extendTextSelection(Offset pageLocalPosition, double fitScale) {
+    final x = annotation_geo.pxToPt(pageLocalPosition.dx / fitScale, 96);
+    final y = annotation_geo.pxToPt(pageLocalPosition.dy / fitScale, 96);
+    final line = _nearestTextLine(x, y);
+    if (line != null) setState(() => _textSelectionExtent = line);
+  }
+
+  void _moveTextSelectionHandle(
+    DragUpdateDetails details,
+    double fitScale, {
+    required bool anchor,
+  }) {
+    final render = _viewerPageKey.currentContext?.findRenderObject();
+    if (render is! RenderBox) return;
+    final local = render.globalToLocal(details.globalPosition);
+    final x = annotation_geo.pxToPt(local.dx / fitScale, 96);
+    final y = annotation_geo.pxToPt(local.dy / fitScale, 96);
+    final line = _nearestTextLine(x, y);
+    if (line == null) return;
+    setState(() {
+      if (anchor) {
+        _textSelectionAnchor = line;
+      } else {
+        _textSelectionExtent = line;
+      }
+    });
+  }
+
+  int? _nearestTextLine(double x, double y) {
+    var bestIndex = -1;
+    var bestDistance = double.infinity;
+    for (var index = 0; index < _pageTextLines.length; index++) {
+      final rect = _pageTextLines[index].rect;
+      if (rect.length != 4) continue;
+      final dx = x < rect[0]
+          ? rect[0] - x
+          : x > rect[2]
+          ? x - rect[2]
+          : 0.0;
+      final dy = y < rect[1]
+          ? rect[1] - y
+          : y > rect[3]
+          ? y - rect[3]
+          : 0.0;
+      final distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    return bestIndex >= 0 && bestDistance <= 64 * 64 ? bestIndex : null;
+  }
+
+  Future<void> _copyTextSelection() async {
+    final anchor = _textSelectionAnchor;
+    final extent = _textSelectionExtent;
+    if (anchor == null || extent == null) return;
+    final start = math.min(anchor, extent);
+    final end = math.max(anchor, extent);
+    final text = [
+      for (var index = start; index <= end; index++) _pageTextLines[index].text,
+    ].join('\n').trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('These lines hold no copyable text.')),
+      );
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Selected text copied.')));
+  }
+
+  Future<void> _applyTextSelection() async {
+    final anchor = _textSelectionAnchor;
+    final extent = _textSelectionExtent;
+    final engine = _engine;
+    final doc = _doc;
+    if (anchor == null || extent == null || engine == null || doc == null) {
+      return;
+    }
+    final start = math.min(anchor, extent);
+    final end = math.max(anchor, extent);
+    final quads = <List<double>>[];
+    for (var index = start; index <= end; index++) {
+      final rect = _pageTextLines[index].rect;
+      quads.add([
+        rect[0],
+        rect[1],
+        rect[2],
+        rect[1],
+        rect[0],
+        rect[3],
+        rect[2],
+        rect[3],
+      ]);
+    }
+    if (quads.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      final response = await engine.executeTool(
+        handle: doc,
+        tool: 'comment_add',
+        argumentsJson: jsonEncode({
+          'page': _page,
+          'type': _textSelectionKind,
+          'quads': quads,
+          if (_textSelectionKind == 'highlight') 'color': _textSelectionColor,
+        }),
+      );
+      if (!mounted) return;
+      setState(() {
+        _textSelectionAnchor = null;
+        _textSelectionExtent = null;
+      });
+      _onOperationStatus(response.status);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Marked ${quads.length} selected line${quads.length == 1 ? '' : 's'}.',
+          ),
+          action: SnackBarAction(label: 'Undo', onPressed: _undo),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _status = 'Could not mark selected text: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Color _selectionColorForName(String name) => switch (name) {
+    'green' => Colors.green,
+    'blue' => Colors.blue,
+    'red' => Colors.red,
+    _ => Colors.yellow,
+  };
 
   void _onViewerPointerCancel(PointerCancelEvent event) {
     _viewerPointerCount = math.max(0, _viewerPointerCount - 1);
@@ -790,7 +1020,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   static const _annotateDpi = 96;
 
-  Future<void> _openAnnotate() async {
+  Future<void> _openAnnotate({
+    AnnotateMode initialMode = AnnotateMode.ink,
+  }) async {
     final doc = _doc;
     final engine = _engine;
     final png = _png;
@@ -810,6 +1042,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             imageWidthPx: size.width * _annotateDpi / 72.0,
             imageHeightPx: size.height * _annotateDpi / 72.0,
             dpi: _annotateDpi,
+            initialMode: initialMode,
           ),
         ),
       );
@@ -1058,6 +1291,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     final engine = _engine;
     final doc = _doc;
     if (engine == null || doc == null) return;
+    final store = SignatureStore();
+    final savedTyped = await store.loadTypedName();
+    final savedDrawn = await store.loadDrawn();
+    if (!mounted) return;
     final choice = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
@@ -1067,11 +1304,49 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Add to this PDF',
-                style: Theme.of(context).textTheme.titleLarge,
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Add to this PDF',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
+              if (savedTyped != null || savedDrawn != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Text(
+                      'Saved on this device',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ),
+              if (savedTyped != null)
+                ListTile(
+                  leading: const Icon(Icons.history_outlined),
+                  title: Text('Use “$savedTyped”'),
+                  subtitle: const Text('Tap to place it'),
+                  onTap: () => Navigator.pop(context, 'saved_typed'),
+                ),
+              if (savedDrawn != null)
+                ListTile(
+                  leading: const Icon(Icons.history_outlined),
+                  title: const Text('Use saved drawing'),
+                  subtitle: const Text('Tap to place it'),
+                  onTap: () => Navigator.pop(context, 'saved_drawn'),
+                ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(
+                    'Create new',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+              ),
               ListTile(
                 leading: const Icon(Icons.draw_outlined),
                 title: const Text('Type a signature'),
@@ -1084,11 +1359,27 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                 subtitle: const Text('Sign with your finger'),
                 onTap: () => Navigator.pop(context, 'draw'),
               ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(
+                    'Quick marks',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+              ),
               ListTile(
                 leading: const Icon(Icons.calendar_today_outlined),
                 title: const Text('Place today’s date'),
                 subtitle: const Text('Tap the page where it belongs'),
                 onTap: () => Navigator.pop(context, 'date'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.check_circle_outline),
+                title: const Text('Add a checkmark or mark'),
+                subtitle: const Text('Check, cross, dot, or line'),
+                onTap: () => Navigator.pop(context, 'mark'),
               ),
             ],
           ),
@@ -1100,6 +1391,82 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       await _openQuickMark();
       return;
     }
+    if (choice == 'mark') {
+      final mark = await showModalBottomSheet<({String type, String label})>(
+        context: context,
+        useSafeArea: true,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final option in const [
+                (type: 'check', label: 'Check ✓'),
+                (type: 'cross', label: 'Cross ✕'),
+                (type: 'dot', label: 'Dot ●'),
+                (type: 'line', label: 'Line ―'),
+              ])
+                ListTile(
+                  leading: Text(
+                    option.label.split(' ').last,
+                    style: const TextStyle(fontSize: 22),
+                  ),
+                  title: Text(option.label.split(' ').first),
+                  onTap: () => Navigator.pop(context, option),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted || mark == null) return;
+      await _openQuickMark(markType: mark.type, markLabel: mark.label);
+      return;
+    }
+    if (choice == 'saved_typed' && savedTyped != null) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SignaturePlacementPage(
+            engine: engine,
+            handle: doc,
+            initialPage: _page,
+            pageCount: _pageCount,
+            onStatusChanged: _onOperationStatus,
+            typedText: savedTyped,
+          ),
+        ),
+      );
+      return;
+    }
+    if (choice == 'saved_drawn' && savedDrawn != null) {
+      setState(() => _busy = true);
+      try {
+        final staged = await engine.stageFile(
+          name: 'signature.png',
+          bytes: savedDrawn,
+        );
+        if (!mounted) return;
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => SignaturePlacementPage(
+              engine: engine,
+              handle: doc,
+              initialPage: _page,
+              pageCount: _pageCount,
+              onStatusChanged: _onOperationStatus,
+              imagePath: staged,
+              imageBytes: savedDrawn,
+            ),
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _status = 'Signature failed: $e');
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+      return;
+    }
     if (choice == 'draw') {
       final png = await showModalBottomSheet<Uint8List>(
         context: context,
@@ -1108,6 +1475,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         builder: (context) => const SignaturePad(),
       );
       if (!mounted || png == null || png.isEmpty) return;
+      await store.saveDrawn(png);
       setState(() => _busy = true);
       try {
         final staged = await engine.stageFile(
@@ -1145,6 +1513,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         builder: (context) => const SignatureSheet(),
       );
       if (!mounted || name == null || name.trim().isEmpty) return;
+      await store.saveTypedName(name.trim());
+      if (!mounted) return;
       await Navigator.push<void>(
         context,
         MaterialPageRoute(
@@ -1180,7 +1550,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _openQuickMark() async {
+  Future<void> _openQuickMark({String? markType, String? markLabel}) async {
     final engine = _engine;
     final doc = _doc;
     final png = _png;
@@ -1195,12 +1565,14 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           pageCount: _pageCount,
           png: png,
           onStatusChanged: _onOperationStatus,
+          markType: markType,
+          markLabel: markLabel,
         ),
       ),
     );
   }
 
-  Future<void> _openComments() async {
+  Future<void> _openComments({int? page, int? focusIndex}) async {
     final engine = _engine;
     final doc = _doc;
     if (engine == null || doc == null) return;
@@ -1212,6 +1584,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           handle: doc,
           onStatusChanged: _onOperationStatus,
           onJumpToPage: _goto,
+          onAddComment: () => _openAnnotate(initialMode: AnnotateMode.note),
+          initialPage: page,
+          focusIndex: focusIndex,
         ),
       ),
     );
@@ -1228,6 +1603,23 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           engine: engine,
           handle: doc,
           currentPage: _page,
+          onStatusChanged: _onOperationStatus,
+          onJumpToPage: _goto,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openLinks() async {
+    final engine = _engine;
+    final doc = _doc;
+    if (engine == null || doc == null) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LinksScreen(
+          engine: engine,
+          handle: doc,
           onStatusChanged: _onOperationStatus,
           onJumpToPage: _goto,
         ),
@@ -1281,6 +1673,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         handle: doc ?? 0,
         pageCount: _pageCount,
         hasDocument: doc != null,
+        documentName: _name,
         onOpenPages: _openPages,
         onStatusChanged: _onOperationStatus,
       ),
@@ -1298,6 +1691,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       builder: (context) => ExportSheet(
         engine: engine,
         handle: doc,
+        page: _page,
+        pageCount: _pageCount,
         onStatusChanged: _onOperationStatus,
       ),
     );
@@ -1430,6 +1825,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           detail: 'Find sourced excerpts or get an extractive summary',
           icon: Icons.summarize_outlined,
         ),
+        (
+          id: 'links',
+          label: 'Links',
+          detail: 'Open or remove links in this document',
+          icon: Icons.link_outlined,
+        ),
       ],
       1 => <({String id, String label, String detail, IconData icon})>[
         (
@@ -1439,10 +1840,22 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           icon: Icons.brush_outlined,
         ),
         (
+          id: 'selectText',
+          label: 'Select text to mark',
+          detail: 'Drag across text; PdfCraft snaps the preview to full lines',
+          icon: Icons.select_all,
+        ),
+        (
           id: 'highlight',
           label: 'Highlight text',
           detail: 'Find a phrase and preview all matches',
           icon: Icons.highlight_outlined,
+        ),
+        (
+          id: 'sign',
+          label: 'Sign & date',
+          detail: 'Type, draw, checkmarks, or place today’s date',
+          icon: Icons.draw_outlined,
         ),
         (
           id: 'forms',
@@ -1451,22 +1864,16 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           icon: Icons.ballot_outlined,
         ),
         (
-          id: 'sign',
-          label: 'Sign & date',
-          detail: 'Type, draw, or place today’s date',
-          icon: Icons.draw_outlined,
+          id: 'pages',
+          label: 'Pages',
+          detail: 'Preview, reorder, rotate, duplicate, or delete',
+          icon: Icons.grid_view_outlined,
         ),
         (
           id: 'text',
           label: 'Edit existing text',
           detail: 'Tap a paragraph, review, then replace',
           icon: Icons.edit_outlined,
-        ),
-        (
-          id: 'pages',
-          label: 'Pages',
-          detail: 'Preview, reorder, rotate, duplicate, or delete',
-          icon: Icons.grid_view_outlined,
         ),
       ],
       _ => <({String id, String label, String detail, IconData icon})>[
@@ -1504,8 +1911,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         await _openComments();
       case 'insights':
         await _openInsights();
+      case 'links':
+        await _openLinks();
       case 'draw':
         await _openAnnotate();
+      case 'selectText':
+        await _openAnnotate(initialMode: AnnotateMode.select);
       case 'highlight':
         await _highlightPhrase();
       case 'forms':
@@ -1562,8 +1973,27 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         await _openSignature();
       default:
         await _explainUnsupportedRequest(request);
+        return;
     }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Done — ${_agentTaskLabel(request)}.')),
+    );
   }
+
+  String _agentTaskLabel(String request) => switch (request) {
+    'phones' => 'phone numbers reviewed',
+    'dates' => 'dates reviewed',
+    'compress' || 'export' || 'ocr' => 'export finished',
+    'compare' => 'comparison finished',
+    'combine' => 'files organized',
+    'pages' => 'pages reviewed',
+    'forms' => 'form visited',
+    'highlight' => 'highlight finished',
+    'secure' => 'security reviewed',
+    'sign' => 'signature flow visited',
+    _ => 'task finished',
+  };
 
   Future<void> _explainUnsupportedRequest(String request) async {
     if (!mounted) return;
@@ -1603,6 +2033,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final selectedLineCount =
+        _textSelectionAnchor == null || _textSelectionExtent == null
+        ? 0
+        : (math.max(_textSelectionAnchor!, _textSelectionExtent!) -
+              math.min(_textSelectionAnchor!, _textSelectionExtent!) +
+              1);
     return Scaffold(
       appBar: AppBar(
         title: const Text('PdfCraft Mobile'),
@@ -1698,6 +2134,69 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                           );
                           final pageWidth = sourceWidth * fitScale;
                           final pageHeight = sourceHeight * fitScale;
+                          final selectionStart =
+                              _textSelectionAnchor == null ||
+                                  _textSelectionExtent == null
+                              ? null
+                              : math.min(
+                                  _textSelectionAnchor!,
+                                  _textSelectionExtent!,
+                                );
+                          final selectionEnd =
+                              _textSelectionAnchor == null ||
+                                  _textSelectionExtent == null
+                              ? null
+                              : math.max(
+                                  _textSelectionAnchor!,
+                                  _textSelectionExtent!,
+                                );
+                          Widget selectionHandle(int index, bool anchor) {
+                            final rect = _pageTextLines[index].rect;
+                            final x =
+                                (anchor ? rect[0] : rect[2]) *
+                                96 /
+                                72 *
+                                fitScale;
+                            final y = rect[3] * 96 / 72 * fitScale;
+                            return Positioned(
+                              left: x - 22,
+                              top: y - 22,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onPanStart: (_) =>
+                                    _viewerLongPressSelecting = true,
+                                onPanUpdate: (details) =>
+                                    _moveTextSelectionHandle(
+                                      details,
+                                      fitScale,
+                                      anchor: anchor,
+                                    ),
+                                onPanEnd: (_) =>
+                                    _viewerLongPressSelecting = false,
+                                child: SizedBox(
+                                  width: 44,
+                                  height: 44,
+                                  child: Center(
+                                    child: Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
                           return Listener(
                             behavior: HitTestBehavior.opaque,
                             onPointerDown: _onViewerPointerDown,
@@ -1711,57 +2210,170 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                 minScale: 1,
                                 maxScale: 8,
                                 child: SizedBox(
-                                  width: pageWidth,
-                                  height: pageHeight,
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.memory(
-                                        _png!,
-                                        fit: BoxFit.fill,
-                                        gaplessPlayback: true,
-                                      ),
-                                      for (final marker in _markers)
-                                        Positioned(
-                                          left: marker.x * fitScale - 24,
-                                          top: marker.y * fitScale - 24,
-                                          child: GestureDetector(
-                                            behavior: HitTestBehavior.opaque,
-                                            onTap: _openComments,
-                                            child: SizedBox(
-                                              width: 48,
-                                              height: 48,
-                                              child: Center(
-                                                child: Tooltip(
-                                                  message: marker.label,
-                                                  child: Container(
-                                                    width: 32,
-                                                    height: 32,
-                                                    decoration: BoxDecoration(
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .primaryContainer,
-                                                      shape: BoxShape.circle,
-                                                      border: Border.all(
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .primary,
+                                  width: constraints.maxWidth,
+                                  height: constraints.maxHeight,
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: pageWidth,
+                                      height: pageHeight,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onLongPressStart: (details) =>
+                                            _beginTextSelection(
+                                              details.localPosition,
+                                              fitScale,
+                                            ),
+                                        onLongPressMoveUpdate: (details) =>
+                                            _extendTextSelection(
+                                              details.localPosition,
+                                              fitScale,
+                                            ),
+                                        onLongPressEnd: (_) =>
+                                            _viewerLongPressSelecting = false,
+                                        child: Stack(
+                                          key: _viewerPageKey,
+                                          fit: StackFit.expand,
+                                          children: [
+                                            Image.memory(
+                                              _png!,
+                                              fit: BoxFit.fill,
+                                              gaplessPlayback: true,
+                                            ),
+                                            if (selectionStart != null &&
+                                                selectionEnd != null)
+                                              for (
+                                                var line = selectionStart;
+                                                line <= selectionEnd;
+                                                line++
+                                              )
+                                                if (_pageTextLines[line]
+                                                        .rect
+                                                        .length ==
+                                                    4)
+                                                  Positioned(
+                                                    left:
+                                                        _pageTextLines[line]
+                                                            .rect[0] *
+                                                        96 /
+                                                        72 *
+                                                        fitScale,
+                                                    top:
+                                                        _pageTextLines[line]
+                                                            .rect[1] *
+                                                        96 /
+                                                        72 *
+                                                        fitScale,
+                                                    width:
+                                                        (_pageTextLines[line]
+                                                                .rect[2] -
+                                                            _pageTextLines[line]
+                                                                .rect[0]) *
+                                                        96 /
+                                                        72 *
+                                                        fitScale,
+                                                    height:
+                                                        (_pageTextLines[line]
+                                                                .rect[3] -
+                                                            _pageTextLines[line]
+                                                                .rect[1]) *
+                                                        96 /
+                                                        72 *
+                                                        fitScale,
+                                                    child: IgnorePointer(
+                                                      child: DecoratedBox(
+                                                        decoration: BoxDecoration(
+                                                          color:
+                                                              _textSelectionKind ==
+                                                                  'highlight'
+                                                              ? _selectionColorForName(
+                                                                  _textSelectionColor,
+                                                                ).withValues(
+                                                                  alpha: 0.38,
+                                                                )
+                                                              : Colors.blue
+                                                                    .withValues(
+                                                                      alpha:
+                                                                          0.10,
+                                                                    ),
+                                                          border: Border.all(
+                                                            color:
+                                                                _textSelectionKind ==
+                                                                    'highlight'
+                                                                ? _selectionColorForName(
+                                                                    _textSelectionColor,
+                                                                  )
+                                                                : Colors.blue,
+                                                          ),
+                                                        ),
                                                       ),
                                                     ),
-                                                    child: Icon(
-                                                      Icons.comment,
-                                                      size: 17,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .primary,
+                                                  ),
+                                            if (selectionStart != null &&
+                                                selectionEnd != null) ...[
+                                              selectionHandle(
+                                                selectionStart,
+                                                true,
+                                              ),
+                                              selectionHandle(
+                                                selectionEnd,
+                                                false,
+                                              ),
+                                            ],
+                                            for (final marker in _markers)
+                                              Positioned(
+                                                left: marker.x * fitScale - 24,
+                                                top: marker.y * fitScale - 24,
+                                                child: GestureDetector(
+                                                  behavior:
+                                                      HitTestBehavior.opaque,
+                                                  onTap: () => _openComments(
+                                                    page: _page,
+                                                    focusIndex: marker.index,
+                                                  ),
+                                                  child: SizedBox(
+                                                    width: 48,
+                                                    height: 48,
+                                                    child: Center(
+                                                      child: Tooltip(
+                                                        message: marker.label,
+                                                        child: Container(
+                                                          width: 32,
+                                                          height: 32,
+                                                          decoration: BoxDecoration(
+                                                            color: Theme.of(context)
+                                                                .colorScheme
+                                                                .primaryContainer,
+                                                            shape:
+                                                                BoxShape.circle,
+                                                            border: Border.all(
+                                                              color:
+                                                                  Theme.of(
+                                                                        context,
+                                                                      )
+                                                                      .colorScheme
+                                                                      .primary,
+                                                            ),
+                                                          ),
+                                                          child: Icon(
+                                                            Icons.comment,
+                                                            size: 17,
+                                                            color:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .primary,
+                                                          ),
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                          ),
+                                          ],
                                         ),
-                                    ],
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1770,6 +2382,103 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                         },
                       ),
               ),
+              if (_textSelectionAnchor != null && _textSelectionExtent != null)
+                Material(
+                  elevation: 4,
+                  color: Theme.of(context).colorScheme.surface,
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '$selectedLineCount ${selectedLineCount == 1 ? 'line' : 'lines'} selected',
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Copy selected text',
+                                onPressed: _copyTextSelection,
+                                icon: const Icon(Icons.copy_outlined),
+                              ),
+                              IconButton(
+                                tooltip: 'Clear selection',
+                                onPressed: () => setState(() {
+                                  _textSelectionAnchor = null;
+                                  _textSelectionExtent = null;
+                                }),
+                                icon: const Icon(Icons.close),
+                              ),
+                            ],
+                          ),
+                          SegmentedButton<String>(
+                            segments: const [
+                              ButtonSegment(
+                                value: 'highlight',
+                                label: Text('Highlight'),
+                              ),
+                              ButtonSegment(
+                                value: 'underline',
+                                label: Text('Underline'),
+                              ),
+                              ButtonSegment(
+                                value: 'strikeout',
+                                label: Text('Strike'),
+                              ),
+                            ],
+                            selected: {_textSelectionKind},
+                            onSelectionChanged: (values) => setState(
+                              () => _textSelectionKind = values.first,
+                            ),
+                          ),
+                          if (_textSelectionKind == 'highlight')
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: 6,
+                              children: [
+                                for (final color in const [
+                                  'yellow',
+                                  'green',
+                                  'blue',
+                                  'red',
+                                ])
+                                  ChoiceChip(
+                                    avatar: CircleAvatar(
+                                      radius: 8,
+                                      backgroundColor: _selectionColorForName(
+                                        color,
+                                      ),
+                                    ),
+                                    label: Text(
+                                      color[0].toUpperCase() +
+                                          color.substring(1),
+                                    ),
+                                    selected: _textSelectionColor == color,
+                                    onSelected: (_) => setState(
+                                      () => _textSelectionColor = color,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: _busy ? null : _applyTextSelection,
+                              child: Text(
+                                'Apply ${_textSelectionKind == 'strikeout' ? 'strikeout' : _textSelectionKind}',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               const Divider(height: 1),
               if (_doc != null)
                 NavigationBar(
@@ -1832,7 +2541,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
               ),
             ],
           ),
-          if (_doc != null)
+          if (_doc != null && _textSelectionAnchor == null)
             Positioned(
               right: 16,
               bottom: 180,
@@ -1846,6 +2555,72 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  Future<void> _newBlankPdf() async {
+    final engine = _engine;
+    if (engine == null || _busy) return;
+    final controller = TextEditingController(text: '1');
+    int? pages;
+    try {
+      final text = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('New blank PDF'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Pages (1–100)',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      );
+      if (text == null || !mounted) return;
+      pages = int.tryParse(text.trim());
+      if (pages == null || pages < 1 || pages > 100) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Enter 1 to 100 pages.')));
+        return;
+      }
+    } finally {
+      controller.dispose();
+    }
+    setState(() => _busy = true);
+    try {
+      final response = await engine.executeTool(
+        handle: 0,
+        tool: 'doc_create',
+        argumentsJson: jsonEncode({
+          'from': 'blank',
+          'pages': pages,
+          'out': 'outputs/blank.pdf',
+        }),
+      );
+      if (!mounted) return;
+      await saveToolOutputs(context, engine, [
+        for (final c in response.contents) c.json,
+      ]);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = 'Could not create a blank PDF: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Widget _emptyDocumentHome() => Center(
@@ -1881,6 +2656,15 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                 label: const Text('Create PDF from photos'),
               ),
             ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _busy || _engine == null ? null : _newBlankPdf,
+                icon: const Icon(Icons.note_add_outlined),
+                label: const Text('Start a blank PDF'),
+              ),
+            ),
             const SizedBox(height: 4),
             TextButton.icon(
               onPressed: _busy || _engine == null ? null : _openOrganize,
@@ -1897,9 +2681,23 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 /// A tappable comment marker, positioned in render pixels over the page
 /// image so it scales together with the page inside the viewer.
 class _Marker {
-  const _Marker({required this.x, required this.y, required this.label});
+  const _Marker({
+    required this.x,
+    required this.y,
+    required this.label,
+    required this.index,
+  });
 
   final double x;
   final double y;
   final String label;
+  final int index;
 }
+
+String _commentMarkerLabel(String type) => switch (type.toLowerCase()) {
+  'text' => 'Note',
+  'freetext' || 'typewriter' => 'Text box',
+  'strikeout' || 'strike_out' => 'Strikethrough',
+  'square' || 'rectangle' => 'Rectangle',
+  _ => '${type[0].toUpperCase()}${type.substring(1).toLowerCase()}',
+};

@@ -17,11 +17,15 @@ class ExportSheet extends StatefulWidget {
     super.key,
     required this.engine,
     required this.handle,
+    required this.page,
+    required this.pageCount,
     required this.onStatusChanged,
   });
 
   final PdfEngineApi engine;
   final int handle;
+  final int page;
+  final int pageCount;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
 
   @override
@@ -63,6 +67,59 @@ class _ExportSheetState extends State<ExportSheet> {
     await saveToolOutputs(context, widget.engine, [
       for (final c in response.contents) c.json,
     ]);
+  }
+
+  Future<void> _exportImages() async {
+    final choice = await showModalBottomSheet<({String format, bool all})>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('This page as PNG'),
+              onTap: () => Navigator.pop(context, (format: 'png', all: false)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('This page as JPEG'),
+              onTap: () => Navigator.pop(context, (format: 'jpeg', all: false)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.collections_outlined),
+              title: Text('All ${widget.pageCount} pages as PNG'),
+              subtitle: const Text('Each image asks where to save'),
+              onTap: () => Navigator.pop(context, (format: 'png', all: true)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    setState(() {
+      _busy = true;
+      _progress = 'Rendering page images…';
+    });
+    try {
+      final response = await _run('doc_export_images', {
+        'folder': 'outputs/images-${DateTime.now().microsecondsSinceEpoch}',
+        'format': choice.format,
+        if (!choice.all) 'pages': [widget.page],
+      }, refreshStatus: false);
+      if (response == null || !mounted) return;
+      await saveToolOutputs(context, widget.engine, [
+        for (final c in response.contents) c.json,
+      ]);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = null;
+        });
+      }
+    }
   }
 
   Future<void> _exportOffice() async {
@@ -297,26 +354,42 @@ class _ExportSheetState extends State<ExportSheet> {
             .join('\n'),
       );
       if (!mounted) return;
-      final mark = await showDialog<bool>(
+      final next = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Mark these differences?'),
+          title: const Text('What next?'),
           content: const Text(
-            'The PDF currently open is treated as the newer version. Add highlights and notes for inserted, replaced, and deleted text to it? This is undoable.',
+            'The PDF currently open is treated as the newer version. '
+            'Save a report PDF, mark the differences as comments in the '
+            'open PDF, or stop here.',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('No, just compare'),
+              onPressed: () => Navigator.pop(context, 'done'),
+              child: const Text('Done'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'report'),
+              child: const Text('Save report'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(context, 'mark'),
               child: const Text('Mark differences'),
             ),
           ],
         ),
       );
-      if (mark == true && mounted) {
+      if (!mounted) return;
+      if (next == 'report') {
+        final response = await _run('doc_compare_report', {
+          'other': staged,
+          'path': 'outputs/compare-report.pdf',
+        }, refreshStatus: false);
+        if (response == null || !mounted) return;
+        await saveToolOutputs(context, widget.engine, [
+          for (final c in response.contents) c.json,
+        ]);
+      } else if (next == 'mark') {
         final marked = await _run('doc_compare_mark', {'other': staged});
         if (marked != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -335,6 +408,32 @@ class _ExportSheetState extends State<ExportSheet> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _exportMeasurements() async {
+    final response = await _run('measure_export', {
+      'out': 'outputs/measurements.csv',
+    }, refreshStatus: false);
+    if (response == null || !mounted) return;
+    final source = response.contents
+        .where((c) => c.json.isNotEmpty)
+        .map((c) => c.json)
+        .firstOrNull;
+    final data = source == null ? null : jsonDecode(source);
+    final count = data is Map<String, dynamic> ? data['count'] : null;
+    if (count == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No saved measurements yet — measure in Draw & annotate first.',
+          ),
+        ),
+      );
+      return;
+    }
+    await saveToolOutputs(context, widget.engine, [
+      for (final c in response.contents) c.json,
+    ]);
   }
 
   Future<void> _compress() async {
@@ -736,89 +835,116 @@ class _ExportSheetState extends State<ExportSheet> {
     return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
 
+  Widget _section(String label) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+    child: Text(label, style: Theme.of(context).textTheme.labelLarge),
+  );
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Export & more',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 12),
-            if (_busy) const LinearProgressIndicator(),
-            if (_progress != null) ...[
-              const SizedBox(height: 8),
-              Text(_progress!, textAlign: TextAlign.center),
-              const SizedBox(height: 4),
-            ],
-            ListTile(
-              leading: const Icon(Icons.description_outlined),
-              title: const Text('Export text'),
-              onTap: _busy
-                  ? null
-                  : () => _exportSingle('doc_export_text', 'export.txt'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.table_chart_outlined),
-              title: const Text('Convert PDF to Word or another format'),
-              subtitle: const Text('Choose Word, HTML, or Rich Text'),
-              onTap: _busy ? null : _exportOffice,
-            ),
-            ListTile(
-              leading: const Icon(Icons.document_scanner_outlined),
-              title: const Text('Recognize text (OCR)'),
-              onTap: _busy ? null : _ocr,
-            ),
-            ListTile(
-              leading: const Icon(Icons.library_add_check_outlined),
-              title: const Text('OCR multiple PDFs'),
-              subtitle: const Text(
-                'Select files, then save a searchable copy of each',
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 14, 4, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Export & more',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-              onTap: _busy ? null : _ocrBatch,
-            ),
-            ListTile(
-              leading: const Icon(Icons.compare_arrows_outlined),
-              title: const Text('Compare with another PDF'),
-              onTap: _busy ? null : _compare,
-            ),
-            ListTile(
-              leading: const Icon(Icons.compress_outlined),
-              title: const Text('Compress'),
-              onTap: _busy ? null : _compress,
-            ),
-            ListTile(
-              leading: const Icon(Icons.verified_outlined),
-              title: const Text('Verify PDF/A'),
-              onTap: _busy
-                  ? null
-                  : () async {
-                      final response = await _run(
-                        'pdfa_verify',
-                        {},
-                        refreshStatus: false,
-                      );
-                      if (response == null || !mounted) return;
-                      await _showReport(
-                        'PDF/A verification',
-                        response.contents
-                            .where((content) => content.json.isNotEmpty)
-                            .map(
-                              (content) => humanizeToolResult(
-                                'PDF/A check',
-                                content.json,
-                              ),
-                            )
-                            .join('\n'),
-                      );
-                    },
-            ),
-          ],
+              const SizedBox(height: 12),
+              if (_busy) const LinearProgressIndicator(),
+              if (_progress != null) ...[
+                const SizedBox(height: 8),
+                Text(_progress!, textAlign: TextAlign.center),
+                const SizedBox(height: 4),
+              ],
+              _section('Convert'),
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Export text'),
+                onTap: _busy
+                    ? null
+                    : () => _exportSingle('doc_export_text', 'export.txt'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.table_chart_outlined),
+                title: const Text('Convert PDF to Word or another format'),
+                subtitle: const Text('Choose Word, HTML, or Rich Text'),
+                onTap: _busy ? null : _exportOffice,
+              ),
+              ListTile(
+                leading: const Icon(Icons.image_outlined),
+                title: const Text('Export pages as images'),
+                subtitle: const Text('PNG or JPEG, this page or all'),
+                onTap: _busy ? null : _exportImages,
+              ),
+              ListTile(
+                leading: const Icon(Icons.straighten_outlined),
+                title: const Text('Export measurements'),
+                subtitle: const Text('Saved tape readings as a spreadsheet'),
+                onTap: _busy ? null : _exportMeasurements,
+              ),
+              _section('Improve'),
+              ListTile(
+                leading: const Icon(Icons.document_scanner_outlined),
+                title: const Text('Recognize text (OCR)'),
+                onTap: _busy ? null : _ocr,
+              ),
+              ListTile(
+                leading: const Icon(Icons.library_add_check_outlined),
+                title: const Text('OCR multiple PDFs'),
+                subtitle: const Text(
+                  'Select files, then save a searchable copy of each',
+                ),
+                onTap: _busy ? null : _ocrBatch,
+              ),
+              ListTile(
+                leading: const Icon(Icons.compress_outlined),
+                title: const Text('Compress'),
+                subtitle: const Text('Presets or a target file size'),
+                onTap: _busy ? null : _compress,
+              ),
+              _section('Review'),
+              ListTile(
+                leading: const Icon(Icons.compare_arrows_outlined),
+                title: const Text('Compare with another PDF'),
+                subtitle: const Text('Report, or mark differences in place'),
+                onTap: _busy ? null : _compare,
+              ),
+              ListTile(
+                leading: const Icon(Icons.verified_outlined),
+                title: const Text('Verify PDF/A'),
+                onTap: _busy
+                    ? null
+                    : () async {
+                        final response = await _run(
+                          'pdfa_verify',
+                          {},
+                          refreshStatus: false,
+                        );
+                        if (response == null || !mounted) return;
+                        await _showReport(
+                          'PDF/A verification',
+                          response.contents
+                              .where((content) => content.json.isNotEmpty)
+                              .map(
+                                (content) => humanizeToolResult(
+                                  'PDF/A check',
+                                  content.json,
+                                ),
+                              )
+                              .join('\n'),
+                        );
+                      },
+              ),
+            ],
+          ),
         ),
       ),
     );

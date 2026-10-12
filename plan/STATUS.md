@@ -70,8 +70,50 @@ designed during manual feature development so both paths share deterministic han
   routes known requests to reviewed screens and declines the rest in plain words. Verified loops:
   reorder → "Undo Move page" → redo; highlight → marker on page → "Undid 1 change". No JSON, schema
   text, workspace paths, or content URIs are shown to the user; results are summarized
-  (`result_summary.dart`) and files are offered through the system Save sheet. Filtered logcat
-  showed no Flutter fatal errors.
+   (`result_summary.dart`) and files are offered through the system Save sheet. Filtered logcat
+   showed no Flutter fatal errors.
+- Critical audit pass 2026-10-12 (iPhone Preview docs as reference): viewer
+  long-press text selection with line-snapped preview, handles, kind + color
+  choice, and Apply verified with screenshots (“2 lines selected” →
+  “Marked 2 selected lines”, highlight in re-render); comment creation is one
+  tap (Comments + → tap page → type → list) with marker-tap opening the
+  filtered thread (“Note · p1”); form fill on the generated AcroForm verified
+  (“Undo Fill in newsletter”); a real redact-flow bug found and fixed (the
+  dialog sent an `all` argument the engine rejects, so marking always failed
+  and Apply could never succeed) — verified after fix (“Please █ in this
+  form.” + undo); basic combine of two simple PDFs verified (4-page reopen).
+  The   user-reported combine failure is still unreproduced and needs the
+  failing inputs or exact error.
+- Touch-demand pass 2026-10-12 (agents skipped): combine now includes the
+  open PDF first (verified); new blank PDF creation through a confined
+  bridge path (verified: 13-page reopen); viewer Copy for selections
+  (verified); check/cross/dot/line marks through the tap-preview placer
+  (verified); insert-pages-from-file and page-image export in UI with new
+  Rust coverage for `page_insert_file`, `doc_export_images`, check marks,
+  and blank creation (image export verified on device: PNG saved).
+  Remaining touch gaps: drag-crop UI, stamps, scan-to-PDF (needs camera),
+  OCR models (blocked), compare-report Save As.
+- Flow optimization #1 (2026-10-12): saved-signature reuse — the most
+  recent typed name and drawn PNG persist in app-private storage; the
+  chooser offers them first and jumps straight to placement. Verified on
+  device (type once → “Use …” row → placement). Covered by
+  `test/signature_store_test.dart`. Copy-selection, blank-PDF creation,
+  check/cross/dot/line marks, insert-from-file, and page-image export from
+  the same pass are likewise verified (device and/or Rust tests).
+- Full touch-redesign pass (2026-10-12, `plan/TOUCH_REDESIGN_PLAN.md`):
+  grouped Annotate toolbar with stamp/picture tap modes and measured-value
+  feedback; Create/Pages/Stamp + Convert/Improve/Review + Redact/Clean/Lock
+  + Saved/Create/Marks sections; real header/footer dialog, watermark
+  opacity/behind, background presets, remove-marks row; compare-report
+  Save As; measurements export; form reset + values import/export; crop
+  page by drag box; links manager; replace-selected-pages; demand-ordered
+  Edit sheet; one-time gesture coach with neutral Ready status; agent
+  done-snackbar. Device-verified: stamp, crop, picture, yellow tint,
+  links add/list, sections, coach. Host-tested: report, replace, reset,
+  measure export, remove-marks, header/footer+watermark options,
+  insert-file, check mark. Two audit bugs fixed along the way
+  (`_execute` ignoring its tool arg; summary staging path offered as a
+  fake Save As result).
 
 ## Verified engineering changes
 

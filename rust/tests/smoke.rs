@@ -320,3 +320,52 @@ async fn mobile_can_create_a_pdf_from_staged_files_without_opening_a_hidden_docu
         .await
         .expect("close current document");
 }
+
+#[tokio::test]
+async fn mobile_can_create_a_blank_pdf_without_opening_it() {
+    let workspace = tempfile::tempdir().expect("create app sandbox");
+    let engine = Engine::new(workspace.path().to_string_lossy().into_owned());
+    let catalog = engine
+        .operation_catalog()
+        .await
+        .expect("load mobile operation catalog");
+    assert!(
+        catalog.iter().any(|operation| operation.id == "doc_create"),
+        "doc_create must be exposed for blank-PDF creation"
+    );
+    let created = engine
+        .execute_tool(
+            0,
+            "doc_create".to_owned(),
+            serde_json::json!({
+                "from": "blank",
+                "pages": 3,
+                "out": "outputs/blank-test.pdf",
+            })
+            .to_string(),
+        )
+        .await
+        .expect("create a blank PDF");
+    assert!(
+        created
+            .contents
+            .iter()
+            .any(|content| { content.json.contains("blank-test.pdf") })
+    );
+    let output = engine
+        .read_output("outputs/blank-test.pdf".to_owned())
+        .await
+        .expect("read blank PDF");
+    assert!(output.starts_with(b"%PDF"));
+    // Non-blank sources stay behind the staged-file flows.
+    assert!(
+        engine
+            .execute_tool(
+                0,
+                "doc_create".to_owned(),
+                serde_json::json!({"from": "images"}).to_string(),
+            )
+            .await
+            .is_err()
+    );
+}

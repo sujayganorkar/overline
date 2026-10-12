@@ -66,6 +66,16 @@ class CommentThread {
   }
 }
 
+String _commentAction(String tool) => switch (tool) {
+  'comment_reply' => 'send your reply',
+  'comment_set_status' => 'change the review status',
+  'comment_mark' => 'mark the comment',
+  'comment_lock' => 'change the lock',
+  'comment_edit' => 'edit the comment',
+  'comment_delete' => 'delete the comment',
+  _ => 'complete that comment action',
+};
+
 class CommentReply {
   const CommentReply({
     required this.author,
@@ -88,18 +98,25 @@ class CommentsScreen extends StatefulWidget {
     required this.handle,
     required this.onStatusChanged,
     required this.onJumpToPage,
+    required this.onAddComment,
+    this.initialPage,
+    this.focusIndex,
   });
 
   final PdfEngineApi engine;
   final int handle;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
   final ValueChanged<int> onJumpToPage;
+  final Future<void> Function() onAddComment;
+  final int? initialPage;
+  final int? focusIndex;
 
   @override
   State<CommentsScreen> createState() => _CommentsScreenState();
 }
 
 class _CommentsScreenState extends State<CommentsScreen> {
+  final _focusedCommentKey = GlobalKey();
   List<CommentThread> _threads = const [];
   bool _loading = true;
   bool _busy = false;
@@ -120,7 +137,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
       final response = await widget.engine.executeTool(
         handle: widget.handle,
         tool: 'comment_list',
-        argumentsJson: '{}',
+        argumentsJson: jsonEncode({
+          if (widget.initialPage != null) 'page': widget.initialPage,
+        }),
       );
       final threads = <CommentThread>[];
       for (final content in response.contents) {
@@ -143,6 +162,19 @@ class _CommentsScreenState extends State<CommentsScreen> {
         _threads = threads;
         _loading = false;
       });
+      if (widget.focusIndex != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final target = _focusedCommentKey.currentContext;
+          if (target != null) {
+            Scrollable.ensureVisible(
+              target,
+              alignment: 0.2,
+              duration: const Duration(milliseconds: 250),
+            );
+          }
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -150,6 +182,12 @@ class _CommentsScreenState extends State<CommentsScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _addComment() async {
+    if (_loading || _busy) return;
+    await widget.onAddComment();
+    if (mounted) await _reload();
   }
 
   Future<void> _run(
@@ -191,8 +229,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
       await _reload();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$tool failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not ${_commentAction(tool)}: $e')),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -228,8 +267,17 @@ class _CommentsScreenState extends State<CommentsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_loading ? 'Comments' : 'Comments (${_threads.length})'),
+        title: Text(
+          _loading
+              ? 'Comments'
+              : 'Comments${widget.initialPage == null ? '' : ' · page ${widget.initialPage}'} (${_threads.length})',
+        ),
         actions: [
+          IconButton(
+            onPressed: _loading || _busy ? null : _addComment,
+            icon: const Icon(Icons.add_comment_outlined),
+            tooltip: 'Add a note to the current page',
+          ),
           IconButton(
             onPressed: _loading ? null : _reload,
             icon: const Icon(Icons.refresh),
@@ -247,10 +295,21 @@ class _CommentsScreenState extends State<CommentsScreen> {
           : _error != null
           ? Center(child: Text(_error!))
           : _threads.isEmpty
-          ? const Center(
-              child: Text(
-                'No comments yet.\nUse Draw & annotate or Highlight to add some.',
-                textAlign: TextAlign.center,
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'No comments yet. Add a note to start a conversation.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: _loading || _busy ? null : _addComment,
+                    icon: const Icon(Icons.add_comment_outlined),
+                    label: const Text('Add a note'),
+                  ),
+                ],
               ),
             )
           : Stack(
@@ -259,6 +318,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   padding: const EdgeInsets.only(bottom: 80),
                   itemCount: _threads.length,
                   itemBuilder: (context, i) => _ThreadCard(
+                    key: _threads[i].index == widget.focusIndex
+                        ? _focusedCommentKey
+                        : ValueKey('${_threads[i].page}-${_threads[i].index}'),
                     thread: _threads[i],
                     onJump: () {
                       widget.onJumpToPage(_threads[i].page);
@@ -289,6 +351,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                       _target(_threads[i]),
                       confirmDelete: true,
                     ),
+                    highlighted: _threads[i].index == widget.focusIndex,
                   ),
                 ),
                 if (_busy)
@@ -306,6 +369,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
 class _ThreadCard extends StatelessWidget {
   const _ThreadCard({
+    super.key,
     required this.thread,
     required this.onJump,
     required this.onReply,
@@ -314,6 +378,7 @@ class _ThreadCard extends StatelessWidget {
     required this.onLock,
     required this.onEdit,
     required this.onDelete,
+    this.highlighted = false,
   });
 
   final CommentThread thread;
@@ -324,10 +389,14 @@ class _ThreadCard extends StatelessWidget {
   final ValueChanged<bool> onLock;
   final ValueChanged<String> onEdit;
   final VoidCallback onDelete;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
     return Card(
+      color: highlighted
+          ? Theme.of(context).colorScheme.primaryContainer
+          : null,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -459,7 +528,13 @@ class _ThreadCard extends StatelessWidget {
 
   static String _labelFor(String type) {
     if (type.isEmpty) return 'Comment';
-    return '${type[0].toUpperCase()}${type.substring(1).toLowerCase()}';
+    return switch (type.toLowerCase()) {
+      'text' => 'Note',
+      'freetext' || 'typewriter' => 'Text box',
+      'strikeout' || 'strike_out' => 'Strikethrough',
+      'square' || 'rectangle' => 'Rectangle',
+      _ => '${type[0].toUpperCase()}${type.substring(1).toLowerCase()}',
+    };
   }
 
   static Future<void> _replyDialog(

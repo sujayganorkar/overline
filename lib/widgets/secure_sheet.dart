@@ -89,50 +89,41 @@ class _SecureSheetState extends State<SecureSheet> {
 
   Future<void> _redactPhrase() async {
     final controller = TextEditingController();
-    var all = true;
     try {
       final go = await showDialog<bool>(
         context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            title: const Text('Mark text for redaction'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Phrase to redact',
-                    border: OutlineInputBorder(),
-                  ),
+        builder: (context) => AlertDialog(
+          title: const Text('Mark text for redaction'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Phrase to redact',
+                  border: OutlineInputBorder(),
                 ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Every match'),
-                  value: all,
-                  onChanged: (v) => setState(() => all = v ?? true),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
               ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Mark'),
-              ),
+              const SizedBox(height: 8),
+              const Text('Every match in the document is marked.'),
             ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Mark'),
+            ),
+          ],
         ),
       );
       if (go != true || controller.text.trim().isEmpty || !mounted) return;
-      await _run('redact_mark', {
-        'find': controller.text.trim(),
-        if (all) 'all': true,
-      });
+      await _run('redact_mark', {'find': controller.text.trim()});
     } finally {
       controller.dispose();
     }
@@ -259,80 +250,94 @@ class _SecureSheetState extends State<SecureSheet> {
     );
   }
 
+  Widget _section(String label) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+    child: Text(label, style: Theme.of(context).textTheme.labelLarge),
+  );
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Redact & secure',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 12),
-            if (_busy) const LinearProgressIndicator(),
-            ListTile(
-              leading: const Icon(Icons.visibility_off_outlined),
-              title: const Text('Mark text for redaction'),
-              subtitle: const Text('Find a phrase, or drag a box in Draw'),
-              onTap: _busy ? null : _redactPhrase,
-            ),
-            ListTile(
-              leading: const Icon(Icons.gavel_outlined),
-              title: const Text('Apply redactions'),
-              subtitle: const Text('Permanently removes marked content'),
-              onTap: _busy
-                  ? null
-                  : () => _run(
-                      'redact_apply',
-                      {},
-                      confirm: true,
-                      confirmTitle: 'Apply redactions?',
-                      confirmBody: 'Covered content is removed for good. PdfCraft checks that marked text is no longer readable. Save afterwards to keep the changes.',
-                      closeAfterSuccess: true,
-                    ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.clear_all),
-              title: const Text('Clear redaction marks'),
-              subtitle: const Text('Remove marks without applying'),
-              onTap: _busy ? null : () => _run('redact_clear', {}),
-            ),
-            ListTile(
-              leading: const Icon(Icons.cleaning_services_outlined),
-              title: const Text('Remove hidden information'),
-              subtitle: const Text('Sanitize metadata, scripts, layers…'),
-              onTap: _busy ? null : _sanitize,
-            ),
-            ListTile(
-              leading: const Icon(Icons.lock_outlined),
-              title: const Text('Protect with passwords'),
-              onTap: _busy ? null : _protect,
-            ),
-            ListTile(
-              leading: const Icon(Icons.lock_open_outlined),
-              title: const Text('Remove security'),
-              onTap: _busy
-                  ? null
-                  : () => _run(
-                      'doc_unprotect',
-                      {},
-                      confirm: true,
-                      confirmTitle: 'Remove security?',
-                      confirmBody: 'Password protection is removed. Undoable until saved.',
-                    ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.layers_clear_outlined),
-              title: const Text('Flatten comments & fields'),
-              onTap: _busy ? null : _flatten,
-            ),
-          ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 14, 4, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Redact & secure',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_busy) const LinearProgressIndicator(),
+              _section('Redact'),
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: const Text('Mark text for redaction'),
+                subtitle: const Text('Find a phrase, or drag a box in Draw'),
+                onTap: _busy ? null : _redactPhrase,
+              ),
+              ListTile(
+                leading: const Icon(Icons.gavel_outlined),
+                title: const Text('Apply redactions'),
+                subtitle: const Text('Permanently removes marked content'),
+                onTap: _busy
+                    ? null
+                    : () => _run(
+                        'redact_apply',
+                        {},
+                        confirm: true,
+                        confirmTitle: 'Apply redactions?',
+                        confirmBody: 'Covered content is removed for good. PdfCraft checks that marked text is no longer readable. Save afterwards to keep the changes.',
+                        closeAfterSuccess: true,
+                      ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.clear_all),
+                title: const Text('Clear redaction marks'),
+                subtitle: const Text('Remove marks without applying'),
+                onTap: _busy ? null : () => _run('redact_clear', {}),
+              ),
+              _section('Clean'),
+              ListTile(
+                leading: const Icon(Icons.cleaning_services_outlined),
+                title: const Text('Remove hidden information'),
+                subtitle: const Text('Sanitize metadata, scripts, layers…'),
+                onTap: _busy ? null : _sanitize,
+              ),
+              ListTile(
+                leading: const Icon(Icons.layers_clear_outlined),
+                title: const Text('Flatten comments & fields'),
+                subtitle: const Text('Turn edits into permanent content'),
+                onTap: _busy ? null : _flatten,
+              ),
+              _section('Lock'),
+              ListTile(
+                leading: const Icon(Icons.lock_outlined),
+                title: const Text('Protect with passwords'),
+                onTap: _busy ? null : _protect,
+              ),
+              ListTile(
+                leading: const Icon(Icons.lock_open_outlined),
+                title: const Text('Remove security'),
+                onTap: _busy
+                    ? null
+                    : () => _run(
+                        'doc_unprotect',
+                        {},
+                        confirm: true,
+                        confirmTitle: 'Remove security?',
+                        confirmBody: 'Password protection is removed. Undoable until saved.',
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
-    );
+    ); // SafeArea
   }
-}
+} // _SecureSheetState

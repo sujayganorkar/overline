@@ -1,15 +1,28 @@
-import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+
+/// One entry in an order sheet: display data only, so the open document and
+/// picked files can share the same list.
+class FileOrderItem {
+  const FileOrderItem({
+    required this.key,
+    required this.name,
+    required this.detail,
+  });
+
+  final String key;
+  final String name;
+  final String detail;
+}
 
 /// Reorder files before a workflow whose result depends on input order.
 /// Large arrow buttons provide a precise thumb alternative to dragging.
-Future<List<PlatformFile>?> showFileOrderSheet(
+Future<List<FileOrderItem>?> showFileOrderSheet(
   BuildContext context, {
-  required List<PlatformFile> files,
+  required List<FileOrderItem> files,
   required String title,
   required String explanation,
   required String actionLabel,
-}) => showModalBottomSheet<List<PlatformFile>>(
+}) => showModalBottomSheet<List<FileOrderItem>>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
@@ -29,7 +42,7 @@ class _FileOrderSheet extends StatefulWidget {
     required this.actionLabel,
   });
 
-  final List<PlatformFile> files;
+  final List<FileOrderItem> files;
   final String title;
   final String explanation;
   final String actionLabel;
@@ -39,7 +52,7 @@ class _FileOrderSheet extends StatefulWidget {
 }
 
 class _FileOrderSheetState extends State<_FileOrderSheet> {
-  late final List<PlatformFile> _ordered = widget.files.toList();
+  late final List<FileOrderItem> _ordered = widget.files.toList();
 
   void _move(int from, int to) {
     if (to < 0 || to >= _ordered.length || from == to) return;
@@ -87,14 +100,14 @@ class _FileOrderSheetState extends State<_FileOrderSheet> {
               itemBuilder: (context, index) {
                 final file = _ordered[index];
                 return ListTile(
-                  key: ValueKey('${file.name}-$index'),
+                  key: ValueKey('${file.key}-$index'),
                   leading: CircleAvatar(child: Text('${index + 1}')),
                   title: Text(
                     file.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  subtitle: Text(_formatSize(file.lengthSync())),
+                  subtitle: Text(file.detail),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -151,7 +164,7 @@ class _FileOrderSheetState extends State<_FileOrderSheet> {
   );
 }
 
-String _formatSize(int? bytes) {
+String formatFileSize(int? bytes) {
   if (bytes == null) return 'Size unavailable';
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';

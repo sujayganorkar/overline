@@ -8,9 +8,11 @@ import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart';
 
-/// Place a date with a single deliberate tap on the visible page. The full
-/// page remains the target (rather than a tiny PDF field); the date preview
-/// uses the same engine preference that will be applied at the tap point.
+/// Place a date (or a check/cross/dot/line mark) with a single deliberate
+/// tap on the visible page. The full page remains the target (rather than a
+/// tiny PDF field); the date preview uses the same engine preference that
+/// will be applied at the tap point. Pass [markType] (one of check, cross,
+/// dot, line) with a [markLabel] to place a mark instead of a date.
 class QuickMarkPage extends StatefulWidget {
   const QuickMarkPage({
     super.key,
@@ -20,6 +22,8 @@ class QuickMarkPage extends StatefulWidget {
     required this.pageCount,
     required this.png,
     required this.onStatusChanged,
+    this.markType,
+    this.markLabel,
   });
 
   final PdfEngineApi engine;
@@ -28,6 +32,8 @@ class QuickMarkPage extends StatefulWidget {
   final int pageCount;
   final Uint8List png;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
+  final String? markType;
+  final String? markLabel;
 
   @override
   State<QuickMarkPage> createState() => _QuickMarkPageState();
@@ -44,10 +50,18 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
   Offset? _draftImagePosition;
   bool _busy = false;
 
+  bool get _isDate => widget.markType == null;
+
+  String get _noun => _isDate ? 'date' : 'mark';
+
   @override
   void initState() {
     super.initState();
-    _loadDatePreference();
+    if (_isDate) {
+      _loadDatePreference();
+    } else {
+      _datePreview = widget.markLabel ?? widget.markType;
+    }
     _loadDimensions();
   }
 
@@ -144,7 +158,7 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
         tool: 'fill_sign_add',
         argumentsJson: jsonEncode({
           'page': _page,
-          'type': 'date',
+          'type': widget.markType ?? 'date',
           'at': [x, y],
         }),
       );
@@ -166,7 +180,12 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
         ),
       );
     } catch (error) {
-      if (mounted) setState(() => _error = 'Date was not placed: $error');
+      if (mounted) {
+        setState(
+          () => _error =
+              '${_noun[0].toUpperCase()}${_noun.substring(1)} was not placed: $error',
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -195,7 +214,9 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Place a date'),
+        title: Text(
+          _isDate ? 'Place a date' : 'Place a ${widget.markLabel ?? 'mark'}',
+        ),
         actions: [
           IconButton(
             tooltip: 'Close without placing',
@@ -300,7 +321,10 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
                               Text('Page $_page of ${widget.pageCount}'),
                               const SizedBox(height: 4),
                               Text(
-                                _datePreview ?? 'Loading today’s date…',
+                                _datePreview ??
+                                    (_isDate
+                                        ? 'Loading today’s date…'
+                                        : 'Loading…'),
                                 style: Theme.of(context).textTheme.titleMedium,
                                 textAlign: TextAlign.center,
                               ),
@@ -319,7 +343,7 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
                     Text(
                       _error ??
                           (_draftImagePosition == null
-                              ? 'Tap the page to preview the date placement.'
+                              ? 'Tap the page to preview the $_noun placement.'
                               : 'Review the preview, then place it or tap a new spot.'),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall,
@@ -338,7 +362,7 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
                         label: Text(
                           _draftImagePosition == null
                               ? 'Choose a position on the page'
-                              : 'Place date here',
+                              : 'Place $_noun here',
                         ),
                       ),
                     ),

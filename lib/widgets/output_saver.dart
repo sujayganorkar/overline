@@ -5,6 +5,19 @@ import 'package:flutter/material.dart';
 
 import '../services/pdf_engine.dart';
 
+/// A result path worth offering through Save As: workspace-relative output
+/// files only. Staged inputs (`imports/…`), absolute paths, and the open
+/// document's own staging path (echoed inside mutating tools' summaries)
+/// are never results — offering them would silently save the wrong bytes.
+bool isOfferableOutput(String path) {
+  if (path.isEmpty || path.startsWith('/')) return false;
+  final segments = path.split(RegExp(r'[/\\]'));
+  if (segments.any((segment) => segment == 'imports' || segment == '..')) {
+    return false;
+  }
+  return true;
+}
+
 /// Find workspace-relative output paths in a tool result and offer Save As
 /// for each one. Upstream file-producing tools report their outputs as
 /// `path` strings or `files` arrays; this keeps every export flow to one
@@ -13,19 +26,23 @@ List<String> outputPathsIn(String jsonSource) {
   try {
     final value = jsonDecode(jsonSource);
     final paths = <String>[];
+    void add(String path) {
+      if (isOfferableOutput(path) && !paths.contains(path)) paths.add(path);
+    }
+
     void visit(Object? node) {
       if (node is Map<String, dynamic>) {
         final hasOutput = node['output'] is String || node['out'] is String;
         for (final entry in node.entries) {
           final v = entry.value;
           if ((entry.key == 'output' || entry.key == 'out') && v is String) {
-            paths.add(v);
+            add(v);
           } else if (entry.key == 'path' && v is String && !hasOutput) {
-            paths.add(v);
+            add(v);
           } else if (entry.key == 'files' && v is List) {
             for (final item in v) {
               if (item is String) {
-                paths.add(item);
+                add(item);
               } else {
                 visit(item);
               }

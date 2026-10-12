@@ -64,6 +64,14 @@ async fn editing_tools_end_to_end() {
         r#"{"page":1,"type":"text","at":[72,700],"text":"OK"}"#,
     )
     .await;
+    // Date placement sends no text: the engine formats today itself.
+    run(
+        &engine,
+        doc,
+        "fill_sign_add",
+        r#"{"page":1,"type":"date","at":[72,720]}"#,
+    )
+    .await;
 
     // Redact phrase, then apply and confirm the text is gone.
     run(&engine, doc, "redact_mark", r#"{"find":"Hello"}"#).await;
@@ -128,6 +136,41 @@ async fn editing_tools_end_to_end() {
         .expect("combined file missing");
     assert!(two.starts_with(b"%PDF"));
 
+    // Fill & Sign check mark placed like the touch mark placer does.
+    run(
+        &engine,
+        doc,
+        "fill_sign_add",
+        r#"{"page":1,"type":"check","at":[72,500]}"#,
+    )
+    .await;
+
+    // Export the first page as an image and confirm a file lands on disk.
+    let out = run(
+        &engine,
+        doc,
+        "doc_export_images",
+        r#"{"folder":"outputs/images","format":"png","pages":[1]}"#,
+    )
+    .await;
+    let files = out
+        .get(0)
+        .and_then(|first| first.get("files"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(files.len(), 1, "one page must produce one image");
+    let png = engine
+        .read_output(
+            files[0]
+                .as_str()
+                .expect("image output path must be a string")
+                .to_owned(),
+        )
+        .await
+        .expect("exported image missing");
+    assert!(png.starts_with(&[0x89, b'P', b'N', b'G']), "not a PNG");
+
     // Forms: author a field, then fill it.
     run(
         &engine,
@@ -137,6 +180,21 @@ async fn editing_tools_end_to_end() {
     )
     .await;
     run(&engine, doc, "form_fill", r#"{"values":{"t1":"filled"}}"#).await;
+
+    // Insert pages from another file after the current page.
+    let staged = engine
+        .stage_file("insert.pdf".to_owned(), source.to_vec())
+        .await
+        .expect("stage insert source");
+    let before = engine.page_count(doc).await.expect("count");
+    run(
+        &engine,
+        doc,
+        "page_insert_file",
+        &format!(r#"{{"path":"{staged}","at":{}}}"#, before + 1),
+    )
+    .await;
+    assert_eq!(engine.page_count(doc).await.expect("count"), before + 1);
 
     // Export, optimize, OCR status, compare.
     run(
@@ -164,6 +222,88 @@ async fn editing_tools_end_to_end() {
         doc,
         "doc_compare",
         r#"{"other":"outputs/one.pdf"}"#,
+    )
+    .await;
+    run(
+        &engine,
+        doc,
+        "doc_compare_report",
+        r#"{"other":"outputs/one.pdf","path":"outputs/report.pdf"}"#,
+    )
+    .await;
+    let report = engine
+        .read_output("outputs/report.pdf".to_owned())
+        .await
+        .expect("compare report missing");
+    assert!(report.starts_with(b"%PDF"));
+
+    // Standard stamp, page image, header/footer + watermark options.
+    run(
+        &engine,
+        doc,
+        "comment_add",
+        r#"{"page":1,"type":"stamp","stamp":"approved","at":[300,400]}"#,
+    )
+    .await;
+    let shot = engine
+        .render_page_png(doc, 1, 72)
+        .await
+        .expect("render for image stamp");
+    let picture = engine
+        .stage_file("pic.png".to_owned(), shot)
+        .await
+        .expect("stage picture");
+    run(
+        &engine,
+        doc,
+        "page_add_image",
+        &format!(r#"{{"page":1,"path":"{picture}","rect":[72,600,272,750]}}"#),
+    )
+    .await;
+    run(
+        &engine,
+        doc,
+        "doc_header_footer",
+        r#"{"header_center":"Draft","footer_center":"Page <<1>>"}"#,
+    )
+    .await;
+    run(
+        &engine,
+        doc,
+        "doc_watermark",
+        r#"{"text":"W","opacity":0.3,"behind":true}"#,
+    )
+    .await;
+    run(&engine, doc, "doc_remove_marks", r#"{"kind":"watermark"}"#).await;
+
+    // Measure, then export the values; reset the filled form.
+    run(
+        &engine,
+        doc,
+        "measure_distance",
+        r#"{"page":1,"points":[[72,72],[200,72]]}"#,
+    )
+    .await;
+    run(
+        &engine,
+        doc,
+        "measure_export",
+        r#"{"out":"outputs/measures.csv"}"#,
+    )
+    .await;
+    let measures = engine
+        .read_output("outputs/measures.csv".to_owned())
+        .await
+        .expect("measurements CSV missing");
+    assert!(!measures.is_empty());
+    run(&engine, doc, "form_reset", "{}").await;
+
+    // Replace the first page with the staged source file.
+    run(
+        &engine,
+        doc,
+        "page_replace",
+        &format!(r#"{{"pages":[1],"path":"{staged}"}}"#),
     )
     .await;
 

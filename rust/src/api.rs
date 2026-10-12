@@ -532,6 +532,7 @@ fn execute_tool(
         && !matches!(
             tool,
             "doc_combine"
+                | "doc_create"
                 | "doc_create_multiple"
                 | "fill_sign_date_format"
                 | "ocr_recognize_files"
@@ -547,8 +548,14 @@ fn execute_tool(
     let object = arguments
         .as_object_mut()
         .ok_or_else(|| "operation arguments must be a JSON object".to_owned())?;
-    if matches!(tool, "doc_compare" | "doc_compare_mark") {
+    if matches!(
+        tool,
+        "doc_compare" | "doc_compare_mark" | "doc_compare_report"
+    ) {
         return compare_with_file(state, handle, tool, object);
+    }
+    if tool == "doc_create" {
+        return create_blank(state, object);
     }
     if requires_document {
         let doc = state
@@ -619,6 +626,77 @@ fn execute_tool(
     Ok(OperationResponse { contents, status })
 }
 
+/// Create a blank PDF without opening a second viewer document: the upstream
+/// tool opens a new automation document, so its bytes are written to an
+/// output file and the temporary document is closed again. Only blank
+/// creation is exposed; images/text go through the staged-file flows.
+fn create_blank(
+    state: &mut Runtime,
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<OperationResponse, String> {
+    if object.get("from").and_then(Value::as_str) != Some("blank") {
+        return Err("mobile blank-PDF creation only supports a blank document".to_owned());
+    }
+    let out = object
+        .get("out")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| "outputs/blank.pdf".to_owned());
+    let out_path = Path::new(&out);
+    if out_path.is_absolute()
+        || out_path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("output path must stay inside the app workspace".to_owned());
+    }
+    let mut create_args = serde_json::Map::new();
+    create_args.insert("from".to_owned(), Value::String("blank".to_owned()));
+    if let Some(pages) = object.get("pages").and_then(Value::as_i64) {
+        create_args.insert("pages".to_owned(), Value::Number(pages.into()));
+    }
+    let created = state
+        .automation
+        .call("doc_create", &Value::Object(create_args))
+        .map_err(|error| error.to_string())?;
+    let created_id = created
+        .iter()
+        .find_map(|content| match content {
+            Content::Json(value) => value["doc"].as_u64(),
+            Content::Png { .. } => None,
+        })
+        .ok_or_else(|| "could not create the blank document".to_owned())?;
+    let bytes = state
+        .automation
+        .session()
+        .save_bytes(DocId(created_id))
+        .map_err(|error| error.to_string())?;
+    let target = state.root.join(out_path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("create output folder: {error}"))?;
+    }
+    fs::write(&target, bytes.as_ref()).map_err(|error| format!("write blank PDF: {error}"))?;
+    let _ = state.automation.call(
+        "doc_close",
+        &json!({"doc": created_id, "discard_changes": true}),
+    );
+    Ok(OperationResponse {
+        contents: vec![OperationContent {
+            json: json!({"path": out}).to_string(),
+            png: Vec::new(),
+            width: 0,
+            height: 0,
+        }],
+        status: DocumentStatus {
+            page_count: 0,
+            dirty: false,
+            editable: false,
+            can_undo: String::new(),
+            can_redo: String::new(),
+        },
+    })
+}
+
 /// Compare the open document against a workspace file: the upstream tool
 /// takes an open document id, so the file is opened temporarily and closed
 /// afterwards without touching the user's document list.
@@ -655,6 +733,12 @@ fn compare_with_file(
         }
         if let Some(visual) = object.get("visual") {
             arguments["visual"] = visual.clone();
+        }
+    }
+    if tool == "doc_compare_report" {
+        // The report path stays workspace-relative; the app offers Save As.
+        if let Some(path) = object.get("path") {
+            arguments["path"] = path.clone();
         }
     }
     let result = state.automation.call(tool, &arguments);
@@ -878,6 +962,7 @@ fn mobile_tool(name: &str) -> bool {
         || matches!(
             name,
             "doc_combine"
+                | "doc_create"
                 | "doc_create_multiple"
                 | "fill_sign_date_format"
                 | "ocr_recognize_files"

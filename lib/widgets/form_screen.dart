@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
+import 'output_saver.dart';
 
 /// A form field reported by `form_fields`.
 class FormField {
@@ -140,6 +142,136 @@ class _FormScreenState extends State<FormScreen> {
     }
   }
 
+  Future<void> _reset() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear this form?'),
+        content: const Text(
+          'Every field returns to its default value. This is undoable.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep values'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Clear form'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final response = await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'form_reset',
+        argumentsJson: '{}',
+      );
+      if (!mounted) return;
+      widget.onStatusChanged(response.status);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Form cleared')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _exportData() async {
+    final extension = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.table_chart_outlined),
+              title: const Text('Spreadsheet (.csv)'),
+              onTap: () => Navigator.pop(context, 'csv'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('Form data (.xfdf)'),
+              onTap: () => Navigator.pop(context, 'xfdf'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (extension == null || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      final response = await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'doc_export_data',
+        argumentsJson: jsonEncode({
+          'path': 'outputs/form-data.$extension',
+          'what': 'fields',
+        }),
+      );
+      if (!mounted) return;
+      await saveToolOutputs(context, widget.engine, [
+        for (final c in response.contents) c.json,
+      ]);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _importData() async {
+    final picked = await FilePickerPlatform.instance.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xfdf', 'fdf', 'xml', 'csv', 'txt'],
+      dialogTitle: 'Choose form data to import',
+    );
+    if (picked.isEmpty || !mounted) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final file = picked.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) throw StateError('${file.name} is empty');
+      final staged = await widget.engine.stageFile(
+        name: 'import-${file.name}',
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      final response = await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'doc_import_data',
+        argumentsJson: jsonEncode({'path': staged}),
+      );
+      if (!mounted) return;
+      widget.onStatusChanged(response.status);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Values imported — review, then Save.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
     setState(() {
       _saving = true;
@@ -182,6 +314,25 @@ class _FormScreenState extends State<FormScreen> {
             onPressed: _loading || _saving ? null : _detect,
             icon: const Icon(Icons.auto_fix_high_outlined),
             tooltip: 'Detect fields',
+          ),
+          IconButton(
+            onPressed: _loading || _saving ? null : _reset,
+            icon: const Icon(Icons.restart_alt_outlined),
+            tooltip: 'Clear form to defaults',
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Import or export values',
+            onSelected: (choice) {
+              if (choice == 'export') {
+                _exportData();
+              } else {
+                _importData();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'export', child: Text('Export values')),
+              PopupMenuItem(value: 'import', child: Text('Import values')),
+            ],
           ),
           TextButton(
             onPressed: _saving || _loading ? null : _save,
