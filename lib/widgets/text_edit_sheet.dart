@@ -192,6 +192,7 @@ class _TextEditSheetState extends State<TextEditSheet> {
             autofocus: true,
             maxLines: 6,
             decoration: InputDecoration(
+              labelText: 'Paragraph text',
               helperText:
                   '${paragraph.font} ${paragraph.size.toStringAsFixed(1)} pt',
               border: const OutlineInputBorder(),
@@ -254,6 +255,7 @@ class _TextEditSheetState extends State<TextEditSheet> {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'Close text editor',
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close),
                   ),
@@ -276,60 +278,74 @@ class _TextEditSheetState extends State<TextEditSheet> {
                           pageWidth: widget.imageWidthPx,
                           pageHeight: widget.imageHeightPx,
                         );
-                        return Center(
-                          child: SizedBox(
-                            width: widget.imageWidthPx * fitScale,
-                            height: widget.imageHeightPx * fitScale,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTapUp: (details) =>
-                                  _selectAt(details.localPosition, fitScale),
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  Image.memory(widget.png, fit: BoxFit.fill),
-                                  if (_selected?.rect.length == 4)
-                                    Positioned(
-                                      left:
-                                          _selected!.rect[0] *
-                                          96 /
-                                          72 *
-                                          fitScale,
-                                      top:
-                                          _selected!.rect[1] *
-                                          96 /
-                                          72 *
-                                          fitScale,
-                                      width:
-                                          (_selected!.rect[2] -
-                                              _selected!.rect[0]) *
-                                          96 /
-                                          72 *
-                                          fitScale,
-                                      height:
-                                          (_selected!.rect[3] -
-                                              _selected!.rect[1]) *
-                                          96 /
-                                          72 *
-                                          fitScale,
-                                      child: IgnorePointer(
-                                        child: DecoratedBox(
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary
-                                                .withValues(alpha: 0.15),
-                                            border: Border.all(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .primary,
-                                              width: 2,
+                        return InteractiveViewer(
+                          minScale: 1.0,
+                          maxScale: 6.0,
+                          clipBehavior: Clip.none,
+                          child: Center(
+                            child: SizedBox(
+                              width: widget.imageWidthPx * fitScale,
+                              height: widget.imageHeightPx * fitScale,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTapUp: (details) =>
+                                    _selectAt(details.localPosition, fitScale),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    Image.memory(
+                                      widget.png,
+                                      fit: BoxFit.fill,
+                                      semanticLabel:
+                                          'Page ${widget.page} layout preview for text editing',
+                                    ),
+                                    if (_selected?.rect.length == 4)
+                                      Positioned(
+                                        left:
+                                            _selected!.rect[0] *
+                                            96 /
+                                            72 *
+                                            fitScale,
+                                        top:
+                                            _selected!.rect[1] *
+                                            96 /
+                                            72 *
+                                            fitScale,
+                                        width:
+                                            (_selected!.rect[2] -
+                                                _selected!.rect[0]) *
+                                            96 /
+                                            72 *
+                                            fitScale,
+                                        height:
+                                            (_selected!.rect[3] -
+                                                _selected!.rect[1]) *
+                                            96 /
+                                            72 *
+                                            fitScale,
+                                        child: Semantics(
+                                          label:
+                                              'Selected paragraph: ${_selected!.text}',
+                                          child: IgnorePointer(
+                                            child: DecoratedBox(
+                                              decoration: BoxDecoration(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary
+                                                    .withValues(alpha: 0.15),
+                                                border: Border.all(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                  width: 2,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),

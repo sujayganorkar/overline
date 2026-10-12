@@ -2,7 +2,6 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 /// Drawn signature: capture strokes on a pad, export PNG, stage it, and
 /// place it with `fill_sign_add`. Falls back to the typed signature sheet
@@ -22,7 +21,11 @@ class _SignaturePadState extends State<SignaturePad> {
   String? _error;
 
   Future<void> _place() async {
-    if (_strokes.isEmpty && _current.isEmpty) {
+    final allStrokes = [..._strokes];
+    if (_current.isNotEmpty) {
+      allStrokes.add(_current);
+    }
+    if (allStrokes.isEmpty) {
       setState(() => _error = 'Draw your signature first');
       return;
     }
@@ -32,11 +35,28 @@ class _SignaturePadState extends State<SignaturePad> {
     });
     try {
       final renderObject = _boundary.currentContext?.findRenderObject();
-      if (renderObject is! RenderRepaintBoundary) {
-        throw StateError('Could not capture the signature drawing');
-      }
-      final boundary = renderObject;
-      final image = await boundary.toImage(pixelRatio: 3);
+      final size = (renderObject is RenderBox && renderObject.hasSize)
+          ? renderObject.size
+          : const Size(300, 200);
+
+      // Render crisp black ink on transparent background for stamping onto PDF paper
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      const pixelRatio = 3.0;
+      canvas.scale(pixelRatio, pixelRatio);
+
+      final exportPainter = _SignaturePainter(
+        strokes: allStrokes,
+        current: const [],
+        color: Colors.black,
+      );
+      exportPainter.paint(canvas, size);
+
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(
+        (size.width * pixelRatio).toInt(),
+        (size.height * pixelRatio).toInt(),
+      );
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       if (bytes == null) throw StateError('Could not export the drawing');
       final png = bytes.buffer.asUint8List();
@@ -52,6 +72,10 @@ class _SignaturePadState extends State<SignaturePad> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final padBackground = isDark ? const Color(0xFF222222) : Colors.white;
+    final strokeColor = isDark ? Colors.white : Colors.black;
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
@@ -59,38 +83,54 @@ class _SignaturePadState extends State<SignaturePad> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Draw signature',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 10),
-            Container(
-              height: 200,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: GestureDetector(
-                child: RepaintBoundary(
-                  key: _boundary,
-                  child: CustomPaint(
-                    painter: _SignaturePainter(
-                      strokes: _strokes,
-                      current: _current,
-                    ),
-                    size: Size.infinite,
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Draw signature',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                onPanStart: (d) => setState(() => _current = [d.localPosition]),
-                onPanUpdate: (d) =>
-                    setState(() => _current = [..._current, d.localPosition]),
-                onPanEnd: (_) => setState(() {
-                  if (_current.length > 1) {
-                    _strokes = [..._strokes, _current];
-                  }
-                  _current = [];
-                }),
+                IconButton(
+                  tooltip: 'Cancel drawing',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Semantics(
+              label: 'Signature drawing canvas. Draw with one finger.',
+              child: Container(
+                height: 200,
+                decoration: BoxDecoration(
+                  color: padBackground,
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: GestureDetector(
+                  key: _boundary,
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _SignaturePainter(
+                        strokes: _strokes,
+                        current: _current,
+                        color: strokeColor,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  ),
+                  onPanStart: (d) =>
+                      setState(() => _current = [d.localPosition]),
+                  onPanUpdate: (d) =>
+                      setState(() => _current = [..._current, d.localPosition]),
+                  onPanEnd: (_) => setState(() {
+                    if (_current.length > 1) {
+                      _strokes = [..._strokes, _current];
+                    }
+                    _current = [];
+                  }),
+                ),
               ),
             ),
             if (_error != null)
@@ -133,15 +173,20 @@ class _SignaturePadState extends State<SignaturePad> {
 }
 
 class _SignaturePainter extends CustomPainter {
-  _SignaturePainter({required this.strokes, required this.current});
+  _SignaturePainter({
+    required this.strokes,
+    required this.current,
+    this.color = Colors.black,
+  });
 
   final List<List<Offset>> strokes;
   final List<Offset> current;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.black
+      ..color = color
       ..strokeWidth = 3
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round

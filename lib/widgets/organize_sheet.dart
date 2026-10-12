@@ -550,6 +550,7 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
                   controller: text,
                   autofocus: true,
                   decoration: const InputDecoration(
+                    labelText: 'Watermark text',
                     hintText: 'Text to show on pages',
                     border: OutlineInputBorder(),
                   ),

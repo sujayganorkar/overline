@@ -146,6 +146,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
             controller: titleController,
             autofocus: true,
             decoration: InputDecoration(
+              labelText: 'Bookmark title',
               hintText: 'Title (goes to page ${widget.currentPage})',
               border: const OutlineInputBorder(),
             ),
@@ -202,7 +203,10 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
           content: TextField(
             controller: controller,
             autofocus: true,
-            decoration: const InputDecoration(border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Bookmark title',
+              border: OutlineInputBorder(),
+            ),
           ),
           actions: [
             TextButton(

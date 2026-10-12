@@ -683,7 +683,8 @@ class _ExportSheetState extends State<ExportSheet> {
       final pageCount = math.min(originalPages, compressedPages);
       if (pageCount == 0) throw StateError('The compressed copy has no pages.');
       var page = 1;
-      var showCompressed = true;
+      var viewMode = 'split';
+      var splitRatio = 0.5;
       var loading = false;
       var originalPng = await widget.engine.renderPagePng(
         handle: widget.handle,
@@ -735,7 +736,6 @@ class _ExportSheetState extends State<ExportSheet> {
               }
             }
 
-            final preview = showCompressed ? compressedPng : originalPng;
             final percentSmaller =
                 ((original.length - compressed.length) * 100 / original.length)
                     .round();
@@ -758,14 +758,25 @@ class _ExportSheetState extends State<ExportSheet> {
                       style: Theme.of(dialogContext).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 8),
-                    SegmentedButton<bool>(
+                    SegmentedButton<String>(
                       segments: const [
-                        ButtonSegment(value: false, label: Text('Original')),
-                        ButtonSegment(value: true, label: Text('Compressed')),
+                        ButtonSegment(
+                          value: 'split',
+                          label: Text('Split slider'),
+                          icon: Icon(Icons.compare_outlined, size: 16),
+                        ),
+                        ButtonSegment(
+                          value: 'compressed',
+                          label: Text('Compressed'),
+                        ),
+                        ButtonSegment(
+                          value: 'original',
+                          label: Text('Original'),
+                        ),
                       ],
-                      selected: {showCompressed},
+                      selected: {viewMode},
                       onSelectionChanged: (values) =>
-                          setDialogState(() => showCompressed = values.first),
+                          setDialogState(() => viewMode = values.first),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
@@ -776,7 +787,148 @@ class _ExportSheetState extends State<ExportSheet> {
                             child: InteractiveViewer(
                               minScale: 1,
                               maxScale: 5,
-                              child: Image.memory(preview, fit: BoxFit.contain),
+                              child: viewMode == 'split'
+                                  ? LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        final width = constraints.maxWidth;
+                                        final splitX = width * splitRatio;
+                                        return Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            // Base: Compressed image
+                                            Positioned.fill(
+                                              child: Image.memory(
+                                                compressedPng,
+                                                fit: BoxFit.contain,
+                                              ),
+                                            ),
+                                            // Top: Original clipped to split ratio
+                                            Positioned.fill(
+                                              child: ClipRect(
+                                                clipper:
+                                                    _HorizontalSplitClipper(
+                                                  splitRatio,
+                                                ),
+                                                child: Image.memory(
+                                                  originalPng,
+                                                  fit: BoxFit.contain,
+                                                ),
+                                              ),
+                                            ),
+                                            // Divider line & drag handle
+                                            Positioned(
+                                              left: splitX - 16,
+                                              top: 0,
+                                              bottom: 0,
+                                              width: 32,
+                                              child: GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onHorizontalDragUpdate:
+                                                    (details) {
+                                                  setDialogState(() {
+                                                    splitRatio = (splitRatio +
+                                                            details.delta.dx /
+                                                                width)
+                                                        .clamp(0.05, 0.95);
+                                                  });
+                                                },
+                                                child: Stack(
+                                                  alignment: Alignment.center,
+                                                  children: [
+                                                    Container(
+                                                      width: 2.5,
+                                                      color: Colors.white,
+                                                    ),
+                                                    Container(
+                                                      width: 28,
+                                                      height: 28,
+                                                      decoration:
+                                                          BoxDecoration(
+                                                        color: Theme.of(
+                                                          dialogContext,
+                                                        ).colorScheme.primary,
+                                                        shape:
+                                                            BoxShape.circle,
+                                                        border: Border.all(
+                                                          color: Colors.white,
+                                                          width: 2,
+                                                        ),
+                                                        boxShadow: const [
+                                                          BoxShadow(
+                                                            color:
+                                                                Colors.black38,
+                                                            blurRadius: 4,
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      child: const Icon(
+                                                        Icons.code,
+                                                        size: 15,
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                            // Badges
+                                            Positioned(
+                                              left: 8,
+                                              top: 8,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 2,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black54,
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: const Text(
+                                                  'Original',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            Positioned(
+                                              right: 8,
+                                              top: 8,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 2,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black54,
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: const Text(
+                                                  'Compressed',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    )
+                                  : Image.memory(
+                                      viewMode == 'compressed'
+                                          ? compressedPng
+                                          : originalPng,
+                                      fit: BoxFit.contain,
+                                    ),
                             ),
                           ),
                           if (loading)
@@ -784,6 +936,31 @@ class _ExportSheetState extends State<ExportSheet> {
                         ],
                       ),
                     ),
+                    if (viewMode == 'split')
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Original',
+                              style: Theme.of(dialogContext).textTheme.bodySmall,
+                            ),
+                            Expanded(
+                              child: Slider(
+                                value: splitRatio,
+                                min: 0.05,
+                                max: 0.95,
+                                onChanged: (v) =>
+                                    setDialogState(() => splitRatio = v),
+                              ),
+                            ),
+                            Text(
+                              'Compressed',
+                              style: Theme.of(dialogContext).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
                     Row(
                       children: [
                         IconButton(
@@ -950,3 +1127,17 @@ class _ExportSheetState extends State<ExportSheet> {
     );
   }
 }
+
+/// Clips content to a horizontal split ratio (from 0.0 to 1.0) for side-by-side comparison.
+class _HorizontalSplitClipper extends CustomClipper<Rect> {
+  const _HorizontalSplitClipper(this.ratio);
+
+  final double ratio;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(0, 0, size.width * ratio, size.height);
+
+  @override
+  bool shouldReclip(_HorizontalSplitClipper oldClipper) => oldClipper.ratio != ratio;
+}
+

@@ -586,6 +586,8 @@ class _PageGridState extends State<PageGrid> {
                                     ? Image.memory(
                                         snapshot.data!,
                                         fit: BoxFit.contain,
+                                        semanticLabel:
+                                            'Page ${index + 1} thumbnail',
                                       )
                                     : const Center(
                                         child: CircularProgressIndicator(),
@@ -597,14 +599,14 @@ class _PageGridState extends State<PageGrid> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  tooltip: 'Move earlier',
+                                  tooltip: 'Move page ${index + 1} earlier',
                                   onPressed: _busy || index == 0
                                       ? null
                                       : () => _movePage(index, index - 1),
                                   icon: const Icon(Icons.arrow_upward),
                                 ),
                                 IconButton(
-                                  tooltip: 'Move later',
+                                  tooltip: 'Move page ${index + 1} later',
                                   onPressed: _busy || index == _pageCount - 1
                                       ? null
                                       : () => _movePage(index, index + 1),
@@ -612,10 +614,13 @@ class _PageGridState extends State<PageGrid> {
                                 ),
                                 ReorderableDragStartListener(
                                   index: index,
-                                  child: const SizedBox(
-                                    width: 48,
-                                    height: 48,
-                                    child: Icon(Icons.drag_handle),
+                                  child: Semantics(
+                                    label: 'Drag handle to reorder page',
+                                    child: SizedBox(
+                                      width: 48,
+                                      height: 48,
+                                      child: Icon(Icons.drag_handle),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -638,60 +643,74 @@ class _PageGridState extends State<PageGrid> {
                         final page = _orderedPages[index];
                         final selected = page == widget.currentPage;
                         final selectedForDelete = _selectedPages.contains(page);
-                        return GestureDetector(
-                          onTap: () {
-                            if (_selecting) {
-                              _toggleSelected(page);
-                            } else {
-                              widget.onJumpToPage(page);
-                              Navigator.pop(context);
-                            }
-                          },
-                          onLongPress: () {
-                            if (_selecting) {
-                              _toggleSelected(page);
-                            } else {
-                              setState(() => _selectedPages.add(page));
-                            }
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: selectedForDelete
-                                    ? Theme.of(context).colorScheme.error
-                                    : selected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Theme.of(context).dividerColor,
-                                width: selectedForDelete || selected ? 3 : 1,
+                        return Semantics(
+                          label:
+                              'Page $page of $_pageCount${page == widget.currentPage ? ", current page" : ""}',
+                          selected: _selecting
+                              ? selectedForDelete
+                              : (page == widget.currentPage),
+                          button: true,
+                          hint: _selecting
+                              ? (selectedForDelete
+                                  ? 'Double tap to deselect'
+                                  : 'Double tap to select')
+                              : 'Double tap to jump to page $page. Double tap and hold to select for bulk actions.',
+                          child: GestureDetector(
+                            onTap: () {
+                              if (_selecting) {
+                                _toggleSelected(page);
+                              } else {
+                                widget.onJumpToPage(page);
+                                Navigator.pop(context);
+                              }
+                            },
+                            onLongPress: () {
+                              if (_selecting) {
+                                _toggleSelected(page);
+                              } else {
+                                setState(() => _selectedPages.add(page));
+                              }
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: selectedForDelete
+                                      ? Theme.of(context).colorScheme.error
+                                      : selected
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(context).dividerColor,
+                                  width: selectedForDelete || selected ? 3 : 1,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Column(
-                              children: [
-                                Expanded(
-                                  child: ClipRRect(
-                                    borderRadius: const BorderRadius.vertical(
-                                      top: Radius.circular(5),
-                                    ),
-                                    child: Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        FutureBuilder<Uint8List>(
-                                          future: _thumb(page),
-                                          builder: (context, snapshot) {
-                                            if (!snapshot.hasData) {
-                                              return const Center(
-                                                child:
-                                                    CircularProgressIndicator(),
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: ClipRRect(
+                                      borderRadius: const BorderRadius.vertical(
+                                        top: Radius.circular(5),
+                                      ),
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          FutureBuilder<Uint8List>(
+                                            future: _thumb(page),
+                                            builder: (context, snapshot) {
+                                              if (!snapshot.hasData) {
+                                                return const Center(
+                                                  child:
+                                                      CircularProgressIndicator(),
+                                                );
+                                              }
+                                              return Image.memory(
+                                                snapshot.data!,
+                                                fit: BoxFit.contain,
+                                                gaplessPlayback: true,
+                                                semanticLabel:
+                                                    'Page $page thumbnail',
                                               );
-                                            }
-                                            return Image.memory(
-                                              snapshot.data!,
-                                              fit: BoxFit.contain,
-                                              gaplessPlayback: true,
-                                            );
-                                          },
-                                        ),
+                                            },
+                                          ),
                                         if (_selecting)
                                           Align(
                                             alignment: Alignment.topRight,
@@ -739,8 +758,9 @@ class _PageGridState extends State<PageGrid> {
                               ],
                             ),
                           ),
-                        );
-                      },
+                        ),
+                      );
+                    },
                     ),
             ),
             if (_selecting)

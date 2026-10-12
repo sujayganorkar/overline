@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ class FormField {
     required this.options,
     required this.page,
     required this.readOnly,
+    this.rect,
   });
 
   final String name;
@@ -24,11 +26,16 @@ class FormField {
   final List<String> options;
   final int page;
   final bool readOnly;
+  final List<double>? rect;
 
   static FormField? fromJson(Map<String, dynamic> json) {
     final name = json['name'];
     if (name is! String || name.isEmpty) return null;
     final options = json['options'];
+    final rawRect = json['rect'];
+    final rect = (rawRect is List && rawRect.length == 4)
+        ? [for (final r in rawRect) (r as num).toDouble()]
+        : null;
     return FormField(
       name: name,
       type: json['type'] as String? ?? 'text',
@@ -41,6 +48,7 @@ class FormField {
           : const [],
       page: (json['page'] as num?)?.toInt() ?? 1,
       readOnly: json['read_only'] == true,
+      rect: rect,
     );
   }
 }
@@ -689,11 +697,109 @@ class _FormScreenState extends State<FormScreen> {
     }
   }
 
+  Future<void> _previewFieldOnPage(FormField field) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final png = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: field.page,
+        dpi: 96,
+      );
+      final pageSize = await widget.engine.pageSize(
+        handle: widget.handle,
+        page1Based: field.page,
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      await showDialog<void>(
+        context: context,
+        builder: (dialogCtx) => AlertDialog(
+          title: Text('${field.name} · Page ${field.page}'),
+          content: SizedBox(
+            width: 480,
+            height: MediaQuery.sizeOf(dialogCtx).height * 0.55,
+            child: InteractiveViewer(
+              minScale: 1,
+              maxScale: 6,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final scale = math.min(
+                    constraints.maxWidth / pageSize.width,
+                    constraints.maxHeight / pageSize.height,
+                  );
+                  final renderWidth = pageSize.width * scale;
+                  final renderHeight = pageSize.height * scale;
+                  final r = field.rect;
+
+                  return Center(
+                    child: SizedBox(
+                      width: renderWidth,
+                      height: renderHeight,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: Image.memory(png, fit: BoxFit.fill),
+                          ),
+                          if (r != null && r.length == 4)
+                            Positioned(
+                              left: r[0] * scale,
+                              top: r[1] * scale,
+                              width: (r[2] - r[0]) * scale,
+                              height: (r[3] - r[1]) * scale,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.35),
+                                  border: Border.all(
+                                    color: Colors.deepOrange,
+                                    width: 2.5,
+                                  ),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).popUntil(
+          (r) => r.isFirst || r is! DialogRoute,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not preview field on page: $e')),
+        );
+      }
+    }
+  }
+
   Widget _fieldInput(FormField field) {
     if (field.readOnly) {
       return ListTile(
         title: Text(field.name),
         subtitle: Text('${field.value ?? ''} (read-only)'),
+        trailing: IconButton(
+          tooltip: 'Preview on page ${field.page}',
+          icon: const Icon(Icons.location_searching, size: 20),
+          onPressed: () => _previewFieldOnPage(field),
+        ),
       );
     }
     switch (field.type) {
@@ -702,6 +808,11 @@ class _FormScreenState extends State<FormScreen> {
         return CheckboxListTile(
           title: Text(field.name),
           value: checked,
+          secondary: IconButton(
+            tooltip: 'Preview on page ${field.page}',
+            icon: const Icon(Icons.location_searching, size: 20),
+            onPressed: () => _previewFieldOnPage(field),
+          ),
           onChanged: (v) => setState(() => _values[field.name] = v ?? false),
         );
       case 'radio':
@@ -713,18 +824,30 @@ class _FormScreenState extends State<FormScreen> {
             : field.options;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: DropdownButtonFormField<String>(
-            key: ValueKey('form-select-${field.name}-$_prefillRefresh'),
-            initialValue: items.contains(current) ? current : null,
-            decoration: InputDecoration(
-              labelText: '${field.name} (p${field.page})',
-              border: const OutlineInputBorder(),
-            ),
-            items: [
-              for (final option in items)
-                DropdownMenuItem(value: option, child: Text(option)),
+          child: Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey('form-select-${field.name}-$_prefillRefresh'),
+                  initialValue: items.contains(current) ? current : null,
+                  decoration: InputDecoration(
+                    labelText: '${field.name} (p${field.page})',
+                    border: const OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final option in items)
+                      DropdownMenuItem(value: option, child: Text(option)),
+                  ],
+                  onChanged: (v) => setState(() => _values[field.name] = v),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Preview on page ${field.page}',
+                icon: const Icon(Icons.location_searching, size: 20),
+                onPressed: () => _previewFieldOnPage(field),
+              ),
             ],
-            onChanged: (v) => setState(() => _values[field.name] = v),
           ),
         );
       case 'button':
@@ -732,18 +855,35 @@ class _FormScreenState extends State<FormScreen> {
         return ListTile(
           title: Text(field.name),
           subtitle: Text('${field.type} field — use editing tools'),
+          trailing: IconButton(
+            tooltip: 'Preview on page ${field.page}',
+            icon: const Icon(Icons.location_searching, size: 20),
+            onPressed: () => _previewFieldOnPage(field),
+          ),
         );
       default:
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: TextFormField(
-            key: ValueKey('form-text-${field.name}-$_prefillRefresh'),
-            initialValue: _values[field.name]?.toString() ?? '',
-            decoration: InputDecoration(
-              labelText: '${field.name} (p${field.page})',
-              border: const OutlineInputBorder(),
-            ),
-            onChanged: (v) => _values[field.name] = v,
+          child: Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  key: ValueKey('form-text-${field.name}-$_prefillRefresh'),
+                  initialValue: _values[field.name]?.toString() ?? '',
+                  decoration: InputDecoration(
+                    labelText: '${field.name} (p${field.page})',
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (v) => _values[field.name] = v,
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Preview on page ${field.page}',
+                icon: const Icon(Icons.location_searching, size: 20),
+                onPressed: () => _previewFieldOnPage(field),
+              ),
+            ],
           ),
         );
     }

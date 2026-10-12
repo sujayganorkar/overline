@@ -62,7 +62,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byTooltip('Move later').first);
+    await tester.tap(find.byTooltip('Move page 1 later').first);
     await tester.pump(const Duration(milliseconds: 400));
     expect(engine.lastTool, 'page_move');
     expect(jsonDecode(engine.lastArguments!)['pages'], [1]);

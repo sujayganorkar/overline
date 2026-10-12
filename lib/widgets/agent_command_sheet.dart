@@ -50,6 +50,7 @@ class _AgentCommandSheetState extends State<AgentCommandSheet> {
               textInputAction: TextInputAction.send,
               onSubmitted: _submit,
               decoration: InputDecoration(
+                labelText: 'Describe a PDF task',
                 hintText: 'Describe a PDF task…',
                 prefixIcon: const Icon(Icons.auto_awesome),
                 suffixIcon: IconButton(

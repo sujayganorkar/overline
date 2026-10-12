@@ -188,62 +188,75 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
                       final width = _imageWidthPx * fitScale;
                       final height = _imageHeightPx * fitScale;
                       final position = _draftPositionPx;
-                      return Center(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTapUp: (details) =>
-                              _previewAt(details.localPosition, fitScale),
-                          child: SizedBox(
-                            width: width,
-                            height: height,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                Image.memory(_pagePng!, fit: BoxFit.fill),
-                                if (position != null)
-                                  Positioned(
-                                    left: position.dx * fitScale,
-                                    top: position.dy * fitScale - 24 * fitScale,
-                                    child: IgnorePointer(
-                                      child: Container(
-                                        constraints: BoxConstraints(
-                                          maxWidth:
-                                              width - position.dx * fitScale,
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 4,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .tertiaryContainer,
-                                          border: Border.all(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .tertiary,
+                      return InteractiveViewer(
+                        minScale: 1.0,
+                        maxScale: 6.0,
+                        clipBehavior: Clip.none,
+                        child: Center(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapUp: (details) =>
+                                _previewAt(details.localPosition, fitScale),
+                            child: SizedBox(
+                              width: width,
+                              height: height,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.memory(
+                                    _pagePng!,
+                                    fit: BoxFit.fill,
+                                    semanticLabel:
+                                        'Page $_page preview for signature placement',
+                                  ),
+                                  if (position != null)
+                                    Positioned(
+                                      left: position.dx * fitScale,
+                                      top: position.dy * fitScale - 24 * fitScale,
+                                      child: Semantics(
+                                        label: 'Signature placement preview',
+                                        child: IgnorePointer(
+                                          child: Container(
+                                            constraints: BoxConstraints(
+                                              maxWidth:
+                                                  width - position.dx * fitScale,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .tertiaryContainer,
+                                              border: Border.all(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .tertiary,
+                                              ),
+                                            ),
+                                            child: drawnImage != null
+                                                ? Image.memory(
+                                                    drawnImage,
+                                                    width:
+                                                        150 * _dpi / 72 * fitScale,
+                                                    height:
+                                                        32 * _dpi / 72 * fitScale,
+                                                    fit: BoxFit.contain,
+                                                  )
+                                                : Text(
+                                                    typedText ?? '',
+                                                    style: TextStyle(
+                                                      fontSize: 20 * fitScale,
+                                                      fontStyle: FontStyle.italic,
+                                                    ),
+                                                  ),
                                           ),
                                         ),
-                                        child: drawnImage != null
-                                            ? Image.memory(
-                                                drawnImage,
-                                                width:
-                                                    150 * _dpi / 72 * fitScale,
-                                                height:
-                                                    32 * _dpi / 72 * fitScale,
-                                                fit: BoxFit.contain,
-                                              )
-                                            : Text(
-                                                typedText ?? '',
-                                                style: TextStyle(
-                                                  fontSize: 20 * fitScale,
-                                                  fontStyle: FontStyle.italic,
-                                                ),
-                                              ),
                                       ),
                                     ),
-                                  ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -270,9 +283,12 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
                           icon: const Icon(Icons.chevron_left),
                         ),
                         Expanded(
-                          child: Text(
-                            'Page $_page of ${widget.pageCount}',
-                            textAlign: TextAlign.center,
+                          child: Semantics(
+                            hint: 'Use previous and next page buttons to navigate',
+                            child: Text(
+                              'Page $_page of ${widget.pageCount}',
+                              textAlign: TextAlign.center,
+                            ),
                           ),
                         ),
                         IconButton(

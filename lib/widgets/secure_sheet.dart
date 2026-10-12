@@ -102,7 +102,8 @@ class _SecureSheetState extends State<SecureSheet> {
                 controller: controller,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  hintText: 'Phrase to redact',
+                  labelText: 'Phrase to redact',
+                  hintText: 'Enter phrase to mark across document',
                   border: OutlineInputBorder(),
                 ),
               ),

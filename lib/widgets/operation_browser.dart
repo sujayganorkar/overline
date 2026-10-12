@@ -188,8 +188,9 @@ class _OperationBrowserState extends State<OperationBrowser> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: TextField(
                 decoration: const InputDecoration(
+                  labelText: 'Find an operation',
                   prefixIcon: Icon(Icons.search),
-                  hintText: 'Find an operation',
+                  hintText: 'Search by operation name or keyword',
                   border: OutlineInputBorder(),
                 ),
                 onChanged: (value) => setState(() => _query = value),

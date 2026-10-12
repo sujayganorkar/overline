@@ -218,7 +218,11 @@ class _CropPageState extends State<CropPage> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          Image.memory(_png, fit: BoxFit.fill),
+                          Image.memory(
+                            _png,
+                            fit: BoxFit.fill,
+                            semanticLabel: 'Page $_page preview for cropping',
+                          ),
                           if (box != null)
                             Positioned.fromRect(
                               rect: Rect.fromLTRB(
@@ -227,16 +231,21 @@ class _CropPageState extends State<CropPage> {
                                 box.right * scale,
                                 box.bottom * scale,
                               ),
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primary
-                                        .withValues(alpha: 0.12),
-                                    border: Border.all(
+                              child: Semantics(
+                                label: 'Selected crop area',
+                                child: IgnorePointer(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
                                       color: Theme.of(context)
                                           .colorScheme
-                                          .primary,
-                                      width: 2,
+                                          .primary
+                                          .withValues(alpha: 0.15),
+                                      border: Border.all(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        width: 2,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -269,9 +278,13 @@ class _CropPageState extends State<CropPage> {
                           icon: const Icon(Icons.chevron_left),
                         ),
                         Expanded(
-                          child: Text(
-                            'Page $_page of ${widget.pageCount}',
-                            textAlign: TextAlign.center,
+                          child: Semantics(
+                            hint:
+                                'Use previous and next page buttons to navigate',
+                            child: Text(
+                              'Page $_page of ${widget.pageCount}',
+                              textAlign: TextAlign.center,
+                            ),
                           ),
                         ),
                         IconButton(

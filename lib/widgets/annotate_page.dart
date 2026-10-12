@@ -12,6 +12,7 @@ import 'annotation_geometry.dart' as geo;
 import 'page_viewport.dart';
 
 enum AnnotateMode {
+  pan,
   ink,
   line,
   arrow,
@@ -242,7 +243,11 @@ class _AnnotatePageState extends State<AnnotatePage> {
     BuildContext paintContext,
     double fitScale,
   ) {
-    if (_tapModes.contains(_mode) || _mode == AnnotateMode.select) return;
+    if (_tapModes.contains(_mode) ||
+        _mode == AnnotateMode.select ||
+        _mode == AnnotateMode.pan) {
+      return;
+    }
     if (_mode == AnnotateMode.measure) return;
     final box = paintContext.findRenderObject()! as RenderBox;
     final display = box.globalToLocal(details.globalPosition);
@@ -261,11 +266,13 @@ class _AnnotatePageState extends State<AnnotatePage> {
     BuildContext paintContext,
     double fitScale,
   ) {
-    if (_mode == AnnotateMode.select) return;
+    if (_mode == AnnotateMode.select || _mode == AnnotateMode.pan) return;
     final box = paintContext.findRenderObject()! as RenderBox;
     final display = box.globalToLocal(details.globalPosition);
     final at = Offset(display.dx / fitScale, display.dy / fitScale);
     switch (_mode) {
+      case AnnotateMode.pan:
+        break;
       case AnnotateMode.note:
         _placeNote(at);
       case AnnotateMode.text:
@@ -392,7 +399,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
     BuildContext paintContext,
     double fitScale,
   ) {
-    if (_mode == AnnotateMode.select) return;
+    if (_mode == AnnotateMode.select || _mode == AnnotateMode.pan) return;
     final box = paintContext.findRenderObject()! as RenderBox;
     final display = box.globalToLocal(details.globalPosition);
     final local = Offset(display.dx / fitScale, display.dy / fitScale);
@@ -408,6 +415,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
   }
 
   void _onPanEnd() {
+    if (_mode == AnnotateMode.pan) return;
     setState(() {
       if (_mode == AnnotateMode.ink && _currentStroke.length > 1) {
         _strokes.add(
@@ -434,7 +442,10 @@ class _AnnotatePageState extends State<AnnotatePage> {
             controller: controller,
             autofocus: true,
             maxLines: 4,
-            decoration: const InputDecoration(hintText: 'Note text'),
+            decoration: const InputDecoration(
+              labelText: 'Note text',
+              hintText: 'Enter note contents',
+            ),
           ),
           actions: [
             TextButton(
@@ -470,7 +481,10 @@ class _AnnotatePageState extends State<AnnotatePage> {
           content: TextField(
             controller: controller,
             autofocus: true,
-            decoration: const InputDecoration(hintText: 'Text to place'),
+            decoration: const InputDecoration(
+              labelText: 'Text to place',
+              hintText: 'Enter text to place on page',
+            ),
           ),
           actions: [
             TextButton(
@@ -507,7 +521,10 @@ class _AnnotatePageState extends State<AnnotatePage> {
             controller: controller,
             autofocus: true,
             maxLines: 3,
-            decoration: const InputDecoration(hintText: 'Paragraph text'),
+            decoration: const InputDecoration(
+              labelText: 'Paragraph text',
+              hintText: 'Enter paragraph text to add',
+            ),
           ),
           actions: [
             TextButton(
@@ -804,6 +821,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
             autofocus: true,
             keyboardType: TextInputType.url,
             decoration: const InputDecoration(
+              labelText: 'Destination URL',
               hintText: 'https://example.com',
               border: OutlineInputBorder(),
             ),
@@ -945,6 +963,12 @@ class _AnnotatePageState extends State<AnnotatePage> {
       child: Row(
         children: [
           cluster(
+            label: 'Pan',
+            icon: Icons.pan_tool_outlined,
+            selected: _mode == AnnotateMode.pan,
+            onTap: () => _pickTool(AnnotateMode.pan),
+          ),
+          cluster(
             label: 'Draw',
             icon: Icons.brush,
             selected: _mode == AnnotateMode.ink,
@@ -1030,7 +1054,9 @@ class _AnnotatePageState extends State<AnnotatePage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          _mode == AnnotateMode.select
+          _mode == AnnotateMode.pan
+              ? 'Pan & zoom · page ${widget.page}'
+              : _mode == AnnotateMode.select
               ? 'Select text · page ${widget.page}'
               : _mode == AnnotateMode.note
               ? 'Add a note · page ${widget.page}'
@@ -1077,7 +1103,23 @@ class _AnnotatePageState extends State<AnnotatePage> {
               icon: _overflowIcon,
               onPick: _pickTool,
             ),
-          if (_mode != AnnotateMode.select &&
+          if (_mode == AnnotateMode.pan)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.pan_tool_outlined, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Pan mode active: Drag with one finger to move, pinch to zoom. Select Draw, Note, or Shape to edit.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_mode != AnnotateMode.pan &&
+              _mode != AnnotateMode.select &&
               _mode != AnnotateMode.note &&
               _mode != AnnotateMode.stamp &&
               _mode != AnnotateMode.image)
@@ -1301,26 +1343,31 @@ class _AnnotatePageState extends State<AnnotatePage> {
                                       ),
                                     );
                                 return GestureDetector(
-                                  onTapDown: (details) => _onTapDown(
-                                    details,
-                                    paintContext,
-                                    fitScale,
-                                  ),
-                                  onPanStart: _mode == AnnotateMode.select
+                                  onTapDown: _mode == AnnotateMode.pan
+                                      ? null
+                                      : (details) => _onTapDown(
+                                          details,
+                                          paintContext,
+                                          fitScale,
+                                        ),
+                                  onPanStart: (_mode == AnnotateMode.select ||
+                                          _mode == AnnotateMode.pan)
                                       ? null
                                       : (details) => _onPanStart(
                                           details,
                                           paintContext,
                                           fitScale,
                                         ),
-                                  onPanUpdate: _mode == AnnotateMode.select
+                                  onPanUpdate: (_mode == AnnotateMode.select ||
+                                          _mode == AnnotateMode.pan)
                                       ? null
                                       : (details) => _onPanUpdate(
                                           details,
                                           paintContext,
                                           fitScale,
                                         ),
-                                  onPanEnd: _mode == AnnotateMode.select
+                                  onPanEnd: (_mode == AnnotateMode.select ||
+                                          _mode == AnnotateMode.pan)
                                       ? null
                                       : (_) => _onPanEnd(),
                                   onLongPressStart: _mode == AnnotateMode.select
@@ -1583,6 +1630,7 @@ class _DraftPainter extends CustomPainter {
           shape.end - Offset(head * 1.0, 0).rotate(angle + 0.45),
           paint,
         );
+      case AnnotateMode.pan:
       case AnnotateMode.ink:
       case AnnotateMode.note:
       case AnnotateMode.text:

@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import 'bridge/api.dart' as bridge;
 import 'services/pdf_engine.dart';
 import 'services/signature_store.dart';
+import 'services/recent_documents_store.dart';
 import 'widgets/annotate_page.dart';
 import 'widgets/agent_command_sheet.dart';
 import 'widgets/annotation_geometry.dart' as annotation_geo;
@@ -33,6 +34,7 @@ import 'widgets/signature_placement_page.dart';
 import 'widgets/signature_sheet.dart';
 import 'widgets/text_edit_sheet.dart';
 import 'widgets/output_saver.dart';
+import 'widgets/zoom_controls.dart';
 
 void main() {
   runApp(const PdfCraftApp());
@@ -77,6 +79,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   bool _busy = false;
   bool _dirty = false;
   bool _finding = false;
+  List<FindMatch> _findMatches = const [];
+  int _findActiveIndex = -1;
+  final RecentDocumentsStore _recentStore = RecentDocumentsStore();
+  List<RecentDocumentEntry> _recentDocuments = const [];
   String? _undoLabel;
   String? _redoLabel;
   List<_Marker> _markers = const [];
@@ -105,6 +111,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initEngine();
+    _loadRecents();
+  }
+
+  Future<void> _loadRecents() async {
+    final list = await _recentStore.loadRecents();
+    if (mounted) setState(() => _recentDocuments = list);
   }
 
   Future<void> _initEngine() async {
@@ -171,6 +183,15 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         }
       }
       await _render();
+      unawaited(
+        _recentStore
+            .recordOpened(
+              name: file.name,
+              pageCount: count,
+              bytes: fileBytes,
+            )
+            .then((_) => _loadRecents()),
+      );
     } catch (e) {
       if (openedDoc != null) {
         try {
@@ -180,6 +201,84 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             'Could not close document after open failure: $closeError',
           );
         }
+      }
+      if (!mounted) return;
+      setState(() => _status = 'Open failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openRecent(RecentDocumentEntry entry) async {
+    if (_busy || entry.cachedFilePath == null) return;
+    final file = File(entry.cachedFilePath!);
+    if (!await file.exists()) {
+      await _recentStore.removeRecent(entry.name);
+      await _loadRecents();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('File is no longer available.')),
+        );
+      }
+      return;
+    }
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) return;
+    if (!await _confirmReplacingCurrent()) return;
+
+    setState(() {
+      _busy = true;
+      _status = 'Opening ${entry.name}\u2026';
+    });
+    int? openedDoc;
+    try {
+      final engine = _engine;
+      if (engine == null) throw StateError('engine not initialized');
+      final previousDoc = _doc;
+      openedDoc = await _openDocument(engine, entry.name, bytes);
+      if (openedDoc == null) {
+        if (mounted) setState(() => _status = 'Open cancelled');
+        return;
+      }
+      final count = await engine.pageCount(handle: openedDoc);
+      final status = await engine.status(handle: openedDoc);
+      if (!mounted) {
+        await engine.close(handle: openedDoc);
+        return;
+      }
+      setState(() {
+        _doc = openedDoc;
+        _name = entry.name;
+        _pageCount = count;
+        _page = 1;
+        _dirty = status.dirty;
+        _recoveredUnsaved = false;
+        _recoveryAvailable = false;
+        _status = 'Opened ${entry.name}';
+      });
+      await _clearRecoveryCheckpoint();
+      if (previousDoc != null) {
+        try {
+          await engine.close(handle: previousDoc);
+        } catch (error) {
+          debugPrint('Could not close previous PDF document: $error');
+        }
+      }
+      await _render();
+      unawaited(
+        _recentStore
+            .recordOpened(
+              name: entry.name,
+              pageCount: count,
+              bytes: bytes,
+            )
+            .then((_) => _loadRecents()),
+      );
+    } catch (e) {
+      if (openedDoc != null) {
+        try {
+          await _engine?.close(handle: openedDoc);
+        } catch (_) {}
       }
       if (!mounted) return;
       setState(() => _status = 'Open failed: $e');
@@ -2061,6 +2160,18 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             ),
           if (_doc != null)
             IconButton(
+              onPressed: _busy ? null : () => setState(() => _finding = true),
+              icon: const Icon(Icons.search),
+              tooltip: 'Find in document',
+            ),
+          if (_doc != null)
+            IconButton(
+              onPressed: _busy ? null : _openAgentCommand,
+              icon: const Icon(Icons.auto_awesome),
+              tooltip: 'Ask PdfCraft',
+            ),
+          if (_doc != null)
+            IconButton(
               onPressed: _busy ? null : _save,
               icon: const Icon(Icons.save),
               tooltip: 'Save (engine incremental save)',
@@ -2078,126 +2189,213 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: Stack(
-        fit: StackFit.expand,
+      body: Column(
         children: [
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _name == null
-                            ? _status
-                            : '${documentHeading(_name!, _pageCount)}${_dirty ? ' • Unsaved${_recoveryAvailable ? ' · recovery saved' : ''}' : ''}',
-                        style: Theme.of(context).textTheme.titleSmall,
-                        overflow: TextOverflow.ellipsis,
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          _name == null
+                              ? _status
+                              : documentHeading(_name!, _pageCount),
+                          style: Theme.of(context).textTheme.titleSmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    if (_busy)
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              if (_finding && _doc != null)
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: FindBar(
-                    engine: _engine!,
-                    handle: _doc!,
-                    onJumpToPage: _goto,
-                    onClose: () => setState(() => _finding = false),
+                      if (_doc != null) ...[
+                        const SizedBox(width: 8),
+                        Semantics(
+                          label: _dirty
+                              ? 'Unsaved changes${_recoveryAvailable ? ', recovery checkpoint saved' : ''}'
+                              : 'All changes saved',
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _dirty
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .errorContainer
+                                      .withValues(alpha: 0.7)
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .secondaryContainer
+                                      .withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _dirty
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .error
+                                        .withValues(alpha: 0.4)
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .secondary
+                                        .withValues(alpha: 0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _dirty
+                                      ? Icons.edit_note
+                                      : Icons.check_circle_outline,
+                                  size: 14,
+                                  color: _dirty
+                                      ? Theme.of(context).colorScheme.error
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .secondary,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _dirty
+                                      ? 'Unsaved${_recoveryAvailable ? ' · recovery' : ''}'
+                                      : 'Saved',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: _dirty
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .error
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .secondary,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              if (_finding && _doc != null) const Divider(height: 1),
-              Expanded(
-                child: _png == null
-                    ? _doc == null
-                          ? _emptyDocumentHome()
-                          : Center(child: Text(_status))
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          final sourceWidth = _imageWidthPx ?? 1;
-                          final sourceHeight = _imageHeightPx ?? 1;
-                          final fitScale = fitPageScale(
-                            viewportWidth: constraints.maxWidth,
-                            viewportHeight: constraints.maxHeight,
-                            pageWidth: sourceWidth,
-                            pageHeight: sourceHeight,
-                          );
-                          final pageWidth = sourceWidth * fitScale;
-                          final pageHeight = sourceHeight * fitScale;
-                          final selectionStart =
-                              _textSelectionAnchor == null ||
-                                  _textSelectionExtent == null
-                              ? null
-                              : math.min(
-                                  _textSelectionAnchor!,
-                                  _textSelectionExtent!,
-                                );
-                          final selectionEnd =
-                              _textSelectionAnchor == null ||
-                                  _textSelectionExtent == null
-                              ? null
-                              : math.max(
-                                  _textSelectionAnchor!,
-                                  _textSelectionExtent!,
-                                );
-                          Widget selectionHandle(int index, bool anchor) {
-                            final rect = _pageTextLines[index].rect;
-                            final x =
-                                (anchor ? rect[0] : rect[2]) *
-                                96 /
-                                72 *
-                                fitScale;
-                            final y = rect[3] * 96 / 72 * fitScale;
-                            return Positioned(
-                              left: x - 22,
-                              top: y - 22,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onPanStart: (_) =>
-                                    _viewerLongPressSelecting = true,
-                                onPanUpdate: (details) =>
-                                    _moveTextSelectionHandle(
-                                      details,
-                                      fitScale,
-                                      anchor: anchor,
-                                    ),
-                                onPanEnd: (_) =>
-                                    _viewerLongPressSelecting = false,
-                                child: SizedBox(
-                                  width: 44,
-                                  height: 44,
-                                  child: Center(
-                                    child: Container(
-                                      width: 16,
-                                      height: 16,
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: Colors.white,
-                                          width: 2,
-                                        ),
+                if (_busy)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _png == null
+                ? _doc == null
+                      ? _emptyDocumentHome()
+                      : Center(child: Text(_status))
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final sourceWidth = _imageWidthPx ?? 1;
+                      final sourceHeight = _imageHeightPx ?? 1;
+                      final fitScale = fitPageScale(
+                        viewportWidth: constraints.maxWidth,
+                        viewportHeight: constraints.maxHeight,
+                        pageWidth: sourceWidth,
+                        pageHeight: sourceHeight,
+                      );
+                      final pageWidth = sourceWidth * fitScale;
+                      final pageHeight = sourceHeight * fitScale;
+                      final selectionStart =
+                          _textSelectionAnchor == null ||
+                              _textSelectionExtent == null
+                          ? null
+                          : math.min(
+                              _textSelectionAnchor!,
+                              _textSelectionExtent!,
+                            );
+                      final selectionEnd =
+                          _textSelectionAnchor == null ||
+                              _textSelectionExtent == null
+                          ? null
+                          : math.max(
+                              _textSelectionAnchor!,
+                              _textSelectionExtent!,
+                            );
+
+                      Widget selectionHandle(int index, bool anchor) {
+                        final rect = _pageTextLines[index].rect;
+                        final x =
+                            (anchor ? rect[0] : rect[2]) *
+                            96 /
+                            72 *
+                            fitScale;
+                        final y = rect[3] * 96 / 72 * fitScale;
+                        return Positioned(
+                          left: x - 24,
+                          top: y - 24,
+                          child: Semantics(
+                            label: anchor
+                                ? 'Start text selection handle, line ${index + 1}'
+                                : 'End text selection handle, line ${index + 1}',
+                            slider: true,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (_) {
+                                _viewerLongPressSelecting = true;
+                                HapticFeedback.selectionClick();
+                              },
+                              onPanUpdate: (details) =>
+                                  _moveTextSelectionHandle(
+                                    details,
+                                    fitScale,
+                                    anchor: anchor,
+                                  ),
+                              onPanEnd: (_) =>
+                                  _viewerLongPressSelecting = false,
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Center(
+                                  child: Container(
+                                    width: 18,
+                                    height: 18,
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 2,
                                       ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Colors.black26,
+                                          blurRadius: 3,
+                                          offset: Offset(0, 1),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
                               ),
-                            );
-                          }
+                            ),
+                          ),
+                        );
+                      }
 
-                          return Listener(
+                      return Stack(
+                        fit: StackFit.expand,
+                        clipBehavior: Clip.none,
+                        children: [
+                          // Base layer: Interactive viewer with PDF canvas
+                          Listener(
                             behavior: HitTestBehavior.opaque,
                             onPointerDown: _onViewerPointerDown,
                             onPointerUp: _onViewerPointerUp,
@@ -2218,6 +2416,22 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                       height: pageHeight,
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.opaque,
+                                        onDoubleTapDown: (details) {
+                                          final currentScale =
+                                              _viewerTransform.value
+                                                  .getMaxScaleOnAxis();
+                                          if (currentScale > 1.05) {
+                                            _viewerTransform.value =
+                                                Matrix4.identity();
+                                          } else {
+                                            final focal = details.localPosition;
+                                            final matrix = Matrix4.identity()
+                                              ..translate(-focal.dx, -focal.dy)
+                                              ..scale(2.0, 2.0);
+                                            _viewerTransform.value = matrix;
+                                          }
+                                        },
+                                        onDoubleTap: () {},
                                         onLongPressStart: (details) =>
                                             _beginTextSelection(
                                               details.localPosition,
@@ -2234,11 +2448,102 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                           key: _viewerPageKey,
                                           fit: StackFit.expand,
                                           children: [
-                                            Image.memory(
-                                              _png!,
-                                              fit: BoxFit.fill,
-                                              gaplessPlayback: true,
+                                            Semantics(
+                                              image: true,
+                                              label:
+                                                  'Document page $_page of $_pageCount',
+                                              child: Image.memory(
+                                                _png!,
+                                                fit: BoxFit.fill,
+                                                gaplessPlayback: true,
+                                              ),
                                             ),
+                                            if (_finding &&
+                                                _findMatches.isNotEmpty)
+                                              for (
+                                                var matchIdx = 0;
+                                                matchIdx <
+                                                    _findMatches.length;
+                                                matchIdx++
+                                              )
+                                                if (_findMatches[matchIdx]
+                                                        .page ==
+                                                    _page)
+                                                  for (final rect
+                                                      in _findMatches[matchIdx]
+                                                          .rects)
+                                                    if (rect.length == 4)
+                                                      Positioned(
+                                                        left:
+                                                            math.min(
+                                                              rect[0],
+                                                              rect[2],
+                                                            ) *
+                                                            96 /
+                                                            72 *
+                                                            fitScale,
+                                                        top:
+                                                            math.min(
+                                                              rect[1],
+                                                              rect[3],
+                                                            ) *
+                                                            96 /
+                                                            72 *
+                                                            fitScale,
+                                                        width:
+                                                            (rect[2] - rect[0])
+                                                                .abs() *
+                                                            96 /
+                                                            72 *
+                                                            fitScale,
+                                                        height:
+                                                            (rect[3] - rect[1])
+                                                                .abs() *
+                                                            96 /
+                                                            72 *
+                                                            fitScale,
+                                                        child: IgnorePointer(
+                                                          child: DecoratedBox(
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color:
+                                                                  matchIdx ==
+                                                                      _findActiveIndex
+                                                                  ? const Color(
+                                                                      0xFFFF9800,
+                                                                    ).withValues(
+                                                                      alpha:
+                                                                          0.50,
+                                                                    )
+                                                                  : Colors
+                                                                      .yellow
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.35,
+                                                                      ),
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                    2,
+                                                                  ),
+                                                              border: Border.all(
+                                                                color:
+                                                                    matchIdx ==
+                                                                        _findActiveIndex
+                                                                    ? Colors
+                                                                        .deepOrange
+                                                                    : const Color(
+                                                                        0xFFC79100,
+                                                                      ),
+                                                                width:
+                                                                    matchIdx ==
+                                                                        _findActiveIndex
+                                                                    ? 2.0
+                                                                    : 1.0,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
                                             if (selectionStart != null &&
                                                 selectionEnd != null)
                                               for (
@@ -2299,10 +2604,16 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                                             color:
                                                                 _textSelectionKind ==
                                                                     'highlight'
-                                                                ? _selectionColorForName(
-                                                                    _textSelectionColor,
-                                                                  )
+                                                                ? (_textSelectionColor ==
+                                                                        'yellow'
+                                                                    ? const Color(
+                                                                        0xFFC79100,
+                                                                      )
+                                                                    : _selectionColorForName(
+                                                                        _textSelectionColor,
+                                                                      ))
                                                                 : Colors.blue,
+                                                            width: 1.5,
                                                           ),
                                                         ),
                                                       ),
@@ -2323,29 +2634,44 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                               Positioned(
                                                 left: marker.x * fitScale - 24,
                                                 top: marker.y * fitScale - 24,
-                                                child: GestureDetector(
-                                                  behavior:
-                                                      HitTestBehavior.opaque,
-                                                  onTap: () => _openComments(
-                                                    page: _page,
-                                                    focusIndex: marker.index,
-                                                  ),
-                                                  child: SizedBox(
-                                                    width: 48,
-                                                    height: 48,
-                                                    child: Center(
-                                                      child: Tooltip(
-                                                        message: marker.label,
-                                                        child: Container(
-                                                          width: 32,
-                                                          height: 32,
-                                                          decoration: BoxDecoration(
-                                                            color: Theme.of(context)
-                                                                .colorScheme
-                                                                .primaryContainer,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                            border: Border.all(
+                                                child: Semantics(
+                                                  button: true,
+                                                  label:
+                                                      '${marker.label} on page $_page. Double tap to view comments.',
+                                                  child: GestureDetector(
+                                                    behavior:
+                                                        HitTestBehavior.opaque,
+                                                    onTap: () => _openComments(
+                                                      page: _page,
+                                                      focusIndex: marker.index,
+                                                    ),
+                                                    child: SizedBox(
+                                                      width: 48,
+                                                      height: 48,
+                                                      child: Center(
+                                                        child: Tooltip(
+                                                          message: marker.label,
+                                                          child: Container(
+                                                            width: 32,
+                                                            height: 32,
+                                                            decoration: BoxDecoration(
+                                                              color: Theme.of(context)
+                                                                  .colorScheme
+                                                                  .primaryContainer,
+                                                              shape:
+                                                                  BoxShape.circle,
+                                                              border: Border.all(
+                                                                color:
+                                                                    Theme.of(
+                                                                          context,
+                                                                        )
+                                                                        .colorScheme
+                                                                        .primary,
+                                                              ),
+                                                            ),
+                                                            child: Icon(
+                                                              Icons.comment,
+                                                              size: 17,
                                                               color:
                                                                   Theme.of(
                                                                         context,
@@ -2353,16 +2679,6 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                                                       .colorScheme
                                                                       .primary,
                                                             ),
-                                                          ),
-                                                          child: Icon(
-                                                            Icons.comment,
-                                                            size: 17,
-                                                            color:
-                                                                Theme.of(
-                                                                      context,
-                                                                    )
-                                                                    .colorScheme
-                                                                    .primary,
                                                           ),
                                                         ),
                                                       ),
@@ -2378,180 +2694,247 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                 ),
                               ),
                             ),
-                          );
-                        },
-                      ),
-              ),
-              if (_textSelectionAnchor != null && _textSelectionExtent != null)
-                Material(
-                  elevation: 4,
-                  color: Theme.of(context).colorScheme.surface,
-                  child: SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '$selectedLineCount ${selectedLineCount == 1 ? 'line' : 'lines'} selected',
+                          ),
+
+                          // Floating Overlay: Accessible single-pointer zoom HUD
+                          Positioned(
+                            left: 16,
+                            bottom: 16,
+                            child: ZoomControlsHud(
+                              transformController: _viewerTransform,
+                              minScale: 1,
+                              maxScale: 8,
+                              viewportSize: Size(
+                                constraints.maxWidth,
+                                constraints.maxHeight,
+                              ),
+                            ),
+                          ),
+
+                          // Floating Overlay: Find Bar HUD
+                          if (_finding && _doc != null)
+                            Positioned(
+                              top: 12,
+                              left: 16,
+                              right: 16,
+                              child: FindBar(
+                                engine: _engine!,
+                                handle: _doc!,
+                                onJumpToPage: _goto,
+                                onMatchesChanged: (matches) =>
+                                    setState(() => _findMatches = matches),
+                                onActiveIndexChanged: (index) =>
+                                    setState(() => _findActiveIndex = index),
+                                onClose: () => setState(() {
+                                  _finding = false;
+                                  _findMatches = const [];
+                                  _findActiveIndex = -1;
+                                }),
+                              ),
+                            ),
+
+                          // Floating Overlay: Text selection styling deck
+                          if (_textSelectionAnchor != null &&
+                              _textSelectionExtent != null)
+                            Positioned(
+                              left: 16,
+                              right: 16,
+                              bottom: 16,
+                              child: Material(
+                                elevation: 6,
+                                shadowColor: Colors.black26,
+                                borderRadius: BorderRadius.circular(16),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surface
+                                    .withValues(alpha: 0.96),
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    14,
+                                    8,
+                                    14,
+                                    10,
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '$selectedLineCount ${selectedLineCount == 1 ? 'line' : 'lines'} selected',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleSmall,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Copy selected text',
+                                            onPressed: _copyTextSelection,
+                                            icon: const Icon(Icons.copy_outlined),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Clear selection',
+                                            onPressed: () => setState(() {
+                                              _textSelectionAnchor = null;
+                                              _textSelectionExtent = null;
+                                            }),
+                                            icon: const Icon(Icons.close),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      SegmentedButton<String>(
+                                        segments: const [
+                                          ButtonSegment(
+                                            value: 'highlight',
+                                            label: Text('Highlight'),
+                                          ),
+                                          ButtonSegment(
+                                            value: 'underline',
+                                            label: Text('Underline'),
+                                          ),
+                                          ButtonSegment(
+                                            value: 'strikeout',
+                                            label: Text('Strike'),
+                                          ),
+                                        ],
+                                        selected: {_textSelectionKind},
+                                        onSelectionChanged: (values) =>
+                                            setState(
+                                              () =>
+                                                  _textSelectionKind =
+                                                      values.first,
+                                            ),
+                                      ),
+                                      if (_textSelectionKind == 'highlight') ...[
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          alignment: WrapAlignment.center,
+                                          spacing: 6,
+                                          children: [
+                                            for (final color in const [
+                                              'yellow',
+                                              'green',
+                                              'blue',
+                                              'red',
+                                            ])
+                                              ChoiceChip(
+                                                avatar: CircleAvatar(
+                                                  radius: 8,
+                                                  backgroundColor:
+                                                      _selectionColorForName(
+                                                        color,
+                                                      ),
+                                                ),
+                                                label: Text(
+                                                  color[0].toUpperCase() +
+                                                      color.substring(1),
+                                                ),
+                                                selected:
+                                                    _textSelectionColor ==
+                                                    color,
+                                                onSelected: (_) => setState(
+                                                  () =>
+                                                      _textSelectionColor =
+                                                          color,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ],
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: FilledButton(
+                                          onPressed: _busy
+                                              ? null
+                                              : _applyTextSelection,
+                                          child: Text(
+                                            'Apply ${_textSelectionKind == 'strikeout' ? 'strikeout' : _textSelectionKind}',
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                              IconButton(
-                                tooltip: 'Copy selected text',
-                                onPressed: _copyTextSelection,
-                                icon: const Icon(Icons.copy_outlined),
-                              ),
-                              IconButton(
-                                tooltip: 'Clear selection',
-                                onPressed: () => setState(() {
-                                  _textSelectionAnchor = null;
-                                  _textSelectionExtent = null;
-                                }),
-                                icon: const Icon(Icons.close),
-                              ),
-                            ],
-                          ),
-                          SegmentedButton<String>(
-                            segments: const [
-                              ButtonSegment(
-                                value: 'highlight',
-                                label: Text('Highlight'),
-                              ),
-                              ButtonSegment(
-                                value: 'underline',
-                                label: Text('Underline'),
-                              ),
-                              ButtonSegment(
-                                value: 'strikeout',
-                                label: Text('Strike'),
-                              ),
-                            ],
-                            selected: {_textSelectionKind},
-                            onSelectionChanged: (values) => setState(
-                              () => _textSelectionKind = values.first,
                             ),
-                          ),
-                          if (_textSelectionKind == 'highlight')
-                            Wrap(
-                              alignment: WrapAlignment.center,
-                              spacing: 6,
-                              children: [
-                                for (final color in const [
-                                  'yellow',
-                                  'green',
-                                  'blue',
-                                  'red',
-                                ])
-                                  ChoiceChip(
-                                    avatar: CircleAvatar(
-                                      radius: 8,
-                                      backgroundColor: _selectionColorForName(
-                                        color,
-                                      ),
-                                    ),
-                                    label: Text(
-                                      color[0].toUpperCase() +
-                                          color.substring(1),
-                                    ),
-                                    selected: _textSelectionColor == color,
-                                    onSelected: (_) => setState(
-                                      () => _textSelectionColor = color,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          const SizedBox(height: 6),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              onPressed: _busy ? null : _applyTextSelection,
-                              child: Text(
-                                'Apply ${_textSelectionKind == 'strikeout' ? 'strikeout' : _textSelectionKind}',
-                              ),
-                            ),
-                          ),
                         ],
-                      ),
-                    ),
+                      );
+                    },
+                  ),
+          ),
+          const Divider(height: 1),
+          if (_doc != null)
+            NavigationBar(
+              height: 68,
+              selectedIndex: _activeSurface,
+              onDestinationSelected: _openSurface,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.chrome_reader_mode_outlined),
+                  label: 'Read',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.edit_outlined),
+                  label: 'Edit',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.folder_copy_outlined),
+                  label: 'Organize',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.auto_awesome_outlined),
+                  label: 'Agent',
+                ),
+              ],
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 8,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    _status,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              const Divider(height: 1),
-              if (_doc != null)
-                NavigationBar(
-                  height: 68,
-                  selectedIndex: _activeSurface,
-                  onDestinationSelected: _openSurface,
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.chrome_reader_mode_outlined),
-                      label: 'Read',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.edit_outlined),
-                      label: 'Edit',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.folder_copy_outlined),
-                      label: 'Organize',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.auto_awesome_outlined),
-                      label: 'Agent',
-                    ),
-                  ],
-                ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _status,
-                        style: Theme.of(context).textTheme.bodySmall,
-                        overflow: TextOverflow.ellipsis,
+                if (_doc != null)
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Previous page',
+                        onPressed: _busy || _page <= 1
+                            ? null
+                            : () => _goto(_page - 1),
+                        icon: const Icon(Icons.chevron_left),
                       ),
-                    ),
-                    if (_doc != null)
-                      Row(
-                        children: [
-                          IconButton(
-                            onPressed: _busy ? null : () => _goto(_page - 1),
-                            icon: const Icon(Icons.chevron_left),
-                          ),
-                          TextButton(
-                            onPressed: _busy ? null : _goToPagePrompt,
-                            child: Text('$_page / $_pageCount'),
-                          ),
-                          IconButton(
-                            onPressed: _busy ? null : () => _goto(_page + 1),
-                            icon: const Icon(Icons.chevron_right),
-                          ),
-                        ],
+                      Semantics(
+                        button: true,
+                        hint: 'Double tap to enter page number',
+                        child: TextButton(
+                          onPressed: _busy ? null : _goToPagePrompt,
+                          child: Text('$_page / $_pageCount'),
+                        ),
                       ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (_doc != null && _textSelectionAnchor == null)
-            Positioned(
-              right: 16,
-              bottom: 180,
-              child: FloatingActionButton.extended(
-                heroTag: 'pdfcraft-agent-command',
-                onPressed: _busy ? null : _openAgentCommand,
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Ask'),
-              ),
+                      IconButton(
+                        tooltip: 'Next page',
+                        onPressed: _busy || _page >= _pageCount
+                            ? null
+                            : () => _goto(_page + 1),
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
@@ -2639,6 +3022,79 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             const SizedBox(height: 16),
             Text(_status, textAlign: TextAlign.center),
             const SizedBox(height: 20),
+            if (_recentDocuments.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Recent Documents',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                margin: EdgeInsets.zero,
+                clipBehavior: Clip.antiAlias,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _recentDocuments.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final item = _recentDocuments[index];
+                    return Semantics(
+                      button: true,
+                      label:
+                          'Open recent document ${item.name}, ${item.pageCount} pages',
+                      child: ListTile(
+                        dense: true,
+                        leading: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .primaryContainer,
+                          child: Icon(
+                            Icons.description_outlined,
+                            size: 18,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onPrimaryContainer,
+                          ),
+                        ),
+                        title: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        subtitle: Text(
+                          '${item.pageCount} ${item.pageCount == 1 ? "page" : "pages"}${item.byteLength != null && item.byteLength! > 0 ? " • ${(item.byteLength! / 1024).toStringAsFixed(0)} KB" : ""}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        trailing: Semantics(
+                          button: true,
+                          label: 'Remove ${item.name} from recents',
+                          child: IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            tooltip: 'Remove from recents',
+                            onPressed: () async {
+                              await _recentStore.removeRecent(item.name);
+                              await _loadRecents();
+                            },
+                          ),
+                        ),
+                        onTap: _busy || _engine == null
+                            ? null
+                            : () => _openRecent(item),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(

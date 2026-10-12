@@ -551,7 +551,10 @@ class _ThreadCard extends StatelessWidget {
             controller: controller,
             autofocus: true,
             maxLines: 3,
-            decoration: const InputDecoration(hintText: 'Write a reply'),
+            decoration: const InputDecoration(
+              labelText: 'Reply',
+              hintText: 'Write a reply',
+            ),
           ),
           actions: [
             TextButton(
@@ -607,6 +610,10 @@ class _ThreadCard extends StatelessWidget {
             controller: controller,
             autofocus: true,
             maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: 'Comment text',
+              border: OutlineInputBorder(),
+            ),
           ),
           actions: [
             TextButton(

@@ -6,10 +6,15 @@ import '../services/pdf_engine.dart';
 
 /// A find match from `text_find`.
 class FindMatch {
-  const FindMatch({required this.page, required this.text});
+  const FindMatch({
+    required this.page,
+    required this.text,
+    this.rects = const [],
+  });
 
   final int page;
   final String text;
+  final List<List<double>> rects;
 }
 
 /// In-viewer find bar: query, match count, previous/next navigation.
@@ -17,23 +22,37 @@ class FindMatch {
 class FindBar extends StatefulWidget {
   const FindBar({
     super.key,
-    required this.engine,
-    required this.handle,
-    required this.onJumpToPage,
+    this.engine,
+    this.handle = 0,
+    this.onJumpToPage,
     required this.onClose,
+    this.onMatchesChanged,
+    this.onActiveIndexChanged,
+    this.controller,
+    this.matchIndex,
+    this.matchCount,
+    this.onPrevious,
+    this.onNext,
   });
 
-  final PdfEngineApi engine;
+  final PdfEngineApi? engine;
   final int handle;
-  final ValueChanged<int> onJumpToPage;
+  final ValueChanged<int>? onJumpToPage;
   final VoidCallback onClose;
+  final ValueChanged<List<FindMatch>>? onMatchesChanged;
+  final ValueChanged<int>? onActiveIndexChanged;
+  final TextEditingController? controller;
+  final int? matchIndex;
+  final int? matchCount;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
 
   @override
   State<FindBar> createState() => _FindBarState();
 }
 
 class _FindBarState extends State<FindBar> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller;
   List<FindMatch> _matches = const [];
   int _index = 0;
   bool _searching = false;
@@ -41,12 +60,24 @@ class _FindBarState extends State<FindBar> {
   bool _complete = true;
 
   @override
+  void initState() {
+    super.initState();
+    _controller = widget.controller ?? TextEditingController();
+  }
+
+  @override
   void dispose() {
-    _controller.dispose();
+    widget.onMatchesChanged?.call(const []);
+    widget.onActiveIndexChanged?.call(-1);
+    if (widget.controller == null) {
+      _controller.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _search() async {
+    final engine = widget.engine;
+    if (engine == null) return;
     final query = _controller.text.trim();
     if (query.isEmpty) return;
     setState(() {
@@ -54,7 +85,7 @@ class _FindBarState extends State<FindBar> {
       _error = null;
     });
     try {
-      final response = await widget.engine.executeTool(
+      final response = await engine.executeTool(
         handle: widget.handle,
         tool: 'text_find',
         argumentsJson: jsonEncode({'query': query, 'limit': 200}),
@@ -72,8 +103,23 @@ class _FindBarState extends State<FindBar> {
             if (item is Map<String, dynamic>) {
               final page = (item['page'] as num?)?.toInt();
               if (page != null) {
+                final rawRects = item['rects'];
+                final rects = <List<double>>[];
+                if (rawRects is List) {
+                  for (final r in rawRects) {
+                    if (r is List && r.length == 4) {
+                      rects.add([
+                        for (final v in r) (v as num).toDouble(),
+                      ]);
+                    }
+                  }
+                }
                 matches.add(
-                  FindMatch(page: page, text: item['text'] as String? ?? ''),
+                  FindMatch(
+                    page: page,
+                    text: item['text'] as String? ?? '',
+                    rects: rects,
+                  ),
                 );
               }
             }
@@ -89,7 +135,9 @@ class _FindBarState extends State<FindBar> {
         _index = 0;
         _complete = complete;
       });
-      if (matches.isNotEmpty) widget.onJumpToPage(matches.first.page);
+      widget.onMatchesChanged?.call(matches);
+      widget.onActiveIndexChanged?.call(matches.isEmpty ? -1 : 0);
+      if (matches.isNotEmpty) widget.onJumpToPage?.call(matches.first.page);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -99,33 +147,57 @@ class _FindBarState extends State<FindBar> {
   }
 
   void _step(int delta) {
+    if (widget.onPrevious != null && delta < 0) {
+      widget.onPrevious!();
+      return;
+    }
+    if (widget.onNext != null && delta > 0) {
+      widget.onNext!();
+      return;
+    }
     if (_matches.isEmpty) return;
     setState(() {
       _index = (_index + delta) % _matches.length;
       if (_index < 0) _index += _matches.length;
     });
-    widget.onJumpToPage(_matches[_index].page);
+    widget.onActiveIndexChanged?.call(_index);
+    widget.onJumpToPage?.call(_matches[_index].page);
   }
 
   @override
   Widget build(BuildContext context) {
-    final label = _matches.isEmpty
-        ? (_error ?? 'Find in document')
-        : '${_index + 1} of ${_matches.length}${_complete ? '' : '+'}';
+    final theme = Theme.of(context);
+    final effectiveIndex = widget.matchIndex ?? _index;
+    final totalCount = widget.matchCount ?? _matches.length;
+    final label = (widget.matchCount != null)
+        ? '${effectiveIndex + 1} of $totalCount'
+        : _matches.isEmpty
+            ? (_error ?? 'Find in document')
+            : '${effectiveIndex + 1} of $totalCount${_complete ? '' : '+'}';
+    final hasMatches = widget.matchCount != null
+        ? widget.matchCount! > 0
+        : _matches.isNotEmpty;
+
     return Material(
-      elevation: 4,
-      borderRadius: BorderRadius.circular(12),
+      elevation: 6,
+      shadowColor: Colors.black26,
+      borderRadius: BorderRadius.circular(16),
+      color: theme.colorScheme.surface.withValues(alpha: 0.96),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _controller,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
                 decoration: const InputDecoration(
-                  hintText: 'Find',
+                  labelText: 'Find in PDF',
+                  hintText: 'Type keyword…',
                   border: InputBorder.none,
                   prefixIcon: Icon(Icons.search, size: 20),
+                  isDense: true,
                 ),
                 onSubmitted: (_) => _search(),
               ),
@@ -137,14 +209,22 @@ class _FindBarState extends State<FindBar> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             else
-              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             IconButton(
-              onPressed: _matches.isEmpty ? null : () => _step(-1),
+              onPressed: hasMatches ? () => _step(-1) : null,
               icon: const Icon(Icons.keyboard_arrow_up, size: 20),
               tooltip: 'Previous match',
             ),
             IconButton(
-              onPressed: _matches.isEmpty ? null : () => _step(1),
+              onPressed: hasMatches ? () => _step(1) : null,
               icon: const Icon(Icons.keyboard_arrow_down, size: 20),
               tooltip: 'Next match',
             ),
@@ -156,7 +236,7 @@ class _FindBarState extends State<FindBar> {
             IconButton(
               onPressed: widget.onClose,
               icon: const Icon(Icons.close, size: 20),
-              tooltip: 'Close find',
+              tooltip: 'Close search',
             ),
           ],
         ),
