@@ -528,7 +528,16 @@ fn execute_tool(
             format!("operation {tool:?} is not exposed by the mobile operation catalog")
         })?;
     let requires_document = definition.input_schema["properties"]["doc"].is_object();
-    if !requires_document && tool != "doc_combine" {
+    if !requires_document
+        && !matches!(
+            tool,
+            "doc_combine"
+                | "doc_create_multiple"
+                | "fill_sign_date_format"
+                | "ocr_recognize_files"
+                | "ocr_status"
+        )
+    {
         return Err(format!(
             "operation {tool:?} is not exposed by the mobile operation catalog"
         ));
@@ -538,13 +547,18 @@ fn execute_tool(
     let object = arguments
         .as_object_mut()
         .ok_or_else(|| "operation arguments must be a JSON object".to_owned())?;
+    if matches!(tool, "doc_compare" | "doc_compare_mark") {
+        return compare_with_file(state, handle, tool, object);
+    }
     if requires_document {
         let doc = state
             .docs
             .get(&handle)
             .ok_or_else(|| "unknown document".to_owned())?;
         object.insert("doc".to_owned(), json!(doc.automation_id));
-    } else {
+    } else if tool == "doc_combine" {
+        // A combined document is exported through the mobile file picker; don't create a
+        // second automation document that the current Flutter viewer cannot own yet.
         let file_id = state.next_file;
         state.next_file = file_id
             .checked_add(1)
@@ -552,6 +566,18 @@ fn execute_tool(
         object
             .entry("out")
             .or_insert_with(|| json!(format!("combined-mobile-{file_id}.pdf")));
+        object.entry("open").or_insert(Value::Bool(false));
+    } else if tool == "doc_create_multiple" {
+        // Mobile owns one viewer document at a time; create a file output and
+        // let Flutter deliver it through Save As instead of opening a hidden
+        // Automation document in the background.
+        let file_id = state.next_file;
+        state.next_file = file_id
+            .checked_add(1)
+            .ok_or_else(|| "staged file limit reached".to_owned())?;
+        object
+            .entry("out")
+            .or_insert_with(|| json!(format!("created-mobile-{file_id}.pdf")));
         object.entry("open").or_insert(Value::Bool(false));
     }
     let contents = state
@@ -590,6 +616,75 @@ fn execute_tool(
             can_redo: String::new(),
         }
     };
+    Ok(OperationResponse { contents, status })
+}
+
+/// Compare the open document against a workspace file: the upstream tool
+/// takes an open document id, so the file is opened temporarily and closed
+/// afterwards without touching the user's document list.
+fn compare_with_file(
+    state: &mut Runtime,
+    handle: u32,
+    tool: &str,
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<OperationResponse, String> {
+    let doc = state
+        .docs
+        .get(&handle)
+        .ok_or_else(|| "unknown document".to_owned())?;
+    let other_path = object
+        .get("other")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "compare needs the other file's workspace path".to_owned())?
+        .to_owned();
+    let opened = state
+        .automation
+        .call("doc_open", &json!({"path": other_path}))
+        .map_err(|error| error.to_string())?;
+    let other_id = opened
+        .iter()
+        .find_map(|content| match content {
+            Content::Json(value) => value["doc"].as_u64(),
+            Content::Png { .. } => None,
+        })
+        .ok_or_else(|| "could not open the comparison file".to_owned())?;
+    let mut arguments = json!({"doc": doc.automation_id, "other": other_id});
+    if tool == "doc_compare" {
+        if let Some(limit) = object.get("limit") {
+            arguments["limit"] = limit.clone();
+        }
+        if let Some(visual) = object.get("visual") {
+            arguments["visual"] = visual.clone();
+        }
+    }
+    let result = state.automation.call(tool, &arguments);
+    let _ = state.automation.call(
+        "doc_close",
+        &json!({"doc": other_id, "discard_changes": true}),
+    );
+    let contents = result.map_err(|error| error.to_string())?;
+    let contents = contents
+        .into_iter()
+        .map(|content| match content {
+            Content::Json(value) => OperationContent {
+                json: value.to_string(),
+                png: Vec::new(),
+                width: 0,
+                height: 0,
+            },
+            Content::Png {
+                data,
+                width,
+                height,
+            } => OperationContent {
+                json: String::new(),
+                png: data,
+                width,
+                height,
+            },
+        })
+        .collect();
+    let status = document_status(state, handle)?;
     Ok(OperationResponse { contents, status })
 }
 
@@ -780,7 +875,14 @@ fn mobile_tool(name: &str) -> bool {
     ) && (tools()
         .iter()
         .any(|tool| tool.name == name && tool.input_schema["properties"]["doc"].is_object())
-        || name == "doc_combine")
+        || matches!(
+            name,
+            "doc_combine"
+                | "doc_create_multiple"
+                | "fill_sign_date_format"
+                | "ocr_recognize_files"
+                | "ocr_status"
+        ))
 }
 
 fn operation_info(tool: ToolDef) -> OperationInfo {

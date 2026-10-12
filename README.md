@@ -19,8 +19,10 @@ Verified on this machine (Linux, NDK r27c, Flutter 3.47.7):
 The app UI: open PDF (system document picker), page count, page render at 96 dpi (pinch-zoom), page
 navigation, password prompt, Save As through the system document provider, and an Editing tools
 browser exposing every PdfCraft automation operation (annotations, pages, forms, signatures,
-redaction, OCR, optimize, export, undo/redo) through schema-driven forms. The flow passed on
-the Android emulator and was user-confirmed on a Galaxy S26 Ultra. The phone's Android version and
+redaction, OCR, optimize, export, undo/redo) through schema-driven forms. Bespoke touch UIs cover
+drawing/notes/shapes/highlight annotations, form filling, typed signatures, and a thumbnail page
+grid with rotate/duplicate/delete/move/insert actions — all verified on the Android emulator. The flow was
+user-confirmed on a Galaxy S26 Ultra. The phone's Android version and
 logs were not captured in the engineering session.
 
 ## Layout

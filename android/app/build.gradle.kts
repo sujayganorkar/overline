@@ -34,6 +34,15 @@ android {
         versionName = flutter.versionName
     }
 
+    packaging {
+        jniLibs {
+            // path_provider_android's JNI helper builds this for all ABIs,
+            // independent of the app ABI filters. Shipping only that library
+            // would make Android advertise an unsupported ARMv7 APK variant.
+            excludes += "**/armeabi-v7a/libdartjni.so"
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

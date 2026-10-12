@@ -88,6 +88,53 @@ async fn manual_operation_catalog_edit_undo_save_reopen() {
         .expect("redo operation failed");
     assert_eq!(redone.status.can_undo, "Rotate page");
 
+    // Editing existing text through the same operation bridge the UI uses.
+    let edited = engine
+        .execute_tool(
+            doc,
+            "text_edit".to_owned(),
+            r#"{"page":1,"paragraph":1,"text":"Hello from the bridge"}"#.to_owned(),
+        )
+        .await
+        .expect("text_edit operation failed");
+    assert!(edited.status.dirty);
+    let found = engine
+        .execute_tool(
+            doc,
+            "text_find".to_owned(),
+            r#"{"query":"from the bridge"}"#.to_owned(),
+        )
+        .await
+        .expect("text_find operation failed");
+    assert!(
+        found
+            .contents
+            .iter()
+            .any(|content| content.json.contains("from the bridge")),
+        "edited text must be searchable"
+    );
+
+    // Bookmark add/list round-trip through the bridge.
+    engine
+        .execute_tool(
+            doc,
+            "bookmark_add".to_owned(),
+            r#"{"title":"Bridge mark","page":1}"#.to_owned(),
+        )
+        .await
+        .expect("bookmark_add operation failed");
+    let listed = engine
+        .execute_tool(doc, "bookmark_list".to_owned(), "{}".to_owned())
+        .await
+        .expect("bookmark_list operation failed");
+    assert!(
+        listed
+            .contents
+            .iter()
+            .any(|content| content.json.contains("Bridge mark")),
+        "new bookmark must be listed"
+    );
+
     assert!(
         engine
             .execute_tool(
@@ -177,4 +224,99 @@ async fn manual_operation_catalog_edit_undo_save_reopen() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn mobile_can_create_a_pdf_from_staged_files_without_opening_a_hidden_document() {
+    let workspace = tempfile::tempdir().expect("create app sandbox");
+    let engine = Engine::new(workspace.path().to_string_lossy().into_owned());
+    let input = pdfcraft_engine::Session::new()
+        .create_from_text("photo-source", "Image conversion source")
+        .expect("create source PDF");
+    let doc = engine
+        .open("current.pdf".to_owned(), input.to_vec(), None)
+        .await
+        .expect("open current document");
+    let photo = engine
+        .render_page_png(doc, 1, 72)
+        .await
+        .expect("render source image");
+    let staged = engine
+        .stage_file("photo.png".to_owned(), photo)
+        .await
+        .expect("stage photo");
+    let catalog = engine
+        .operation_catalog()
+        .await
+        .expect("load mobile operation catalog");
+    for required in [
+        "doc_create_multiple",
+        "fill_sign_date_format",
+        "ocr_recognize_files",
+    ] {
+        assert!(
+            catalog.iter().any(|operation| operation.id == required),
+            "missing {required} from the mobile operation catalog"
+        );
+    }
+
+    let created = engine
+        .execute_tool(
+            doc,
+            "doc_create_multiple".to_owned(),
+            serde_json::json!({
+                "paths": [staged],
+                "mode": "combine",
+                "out": "outputs/created-from-files.pdf",
+                "open": false,
+            })
+            .to_string(),
+        )
+        .await
+        .expect("create a PDF from staged input");
+    assert_eq!(created.status.page_count, 0);
+    assert!(
+        created
+            .contents
+            .iter()
+            .any(|content| { content.json.contains("created-from-files.pdf") })
+    );
+    let output = engine
+        .read_output("outputs/created-from-files.pdf".to_owned())
+        .await
+        .expect("read created PDF");
+    assert!(output.starts_with(b"%PDF"));
+
+    let date = engine
+        .execute_tool(doc, "fill_sign_date_format".to_owned(), "{}".to_owned())
+        .await
+        .expect("read Fill & Sign date preference");
+    assert!(
+        date.contents
+            .iter()
+            .any(|content| { content.json.contains("\"today\"") })
+    );
+    let older = pdfcraft_engine::Session::new()
+        .create_from_text("older", "Older wording")
+        .expect("create older comparison PDF");
+    let older_path = engine
+        .stage_file("older.pdf".to_owned(), older.to_vec())
+        .await
+        .expect("stage older comparison PDF");
+    let marked = engine
+        .execute_tool(
+            doc,
+            "doc_compare_mark".to_owned(),
+            serde_json::json!({"other": older_path}).to_string(),
+        )
+        .await
+        .expect("mark comparison differences");
+    assert!(
+        marked.status.dirty,
+        "difference comments should be undoable edits"
+    );
+    engine
+        .close(doc, true)
+        .await
+        .expect("close current document");
 }

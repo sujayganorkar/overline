@@ -44,10 +44,34 @@ designed during manual feature development so both paths share deterministic han
   `operation_catalog`/`execute_tool` over FRB. The Flutter app has an Editing tools browser that
   renders every upstream tool's JSON schema as an argument form (search, destructive confirmation,
   file staging, result display, output Save As).
-- On the x86_64 Android 15/API 35 emulator, the app opened a 2-page engine-generated PDF, ran
-  `page_rotate` (pages [1], 90°) from the operation browser, showed `dirty: true` / `undo: "Rotate
-  page"`, saved via Save As with a generation-guarded commit, and reopened the saved copy with the
-  rotation visibly applied in the render. Filtered logcat showed no fatal errors.
+- On the x86_64 Android 15/API 35 emulator, four bespoke editing UIs were verified against
+  real engine behavior: freehand ink annotation drawn by touch (stroke preview, `comment_add`,
+  re-render shows the stroke); phrase highlight (`comment_add` highlight, yellow highlight in the
+  render); form fill on an engine-generated AcroForm (text + checkbox listed, filled, and visible
+  in the re-render with regenerated appearances); typed script-font signature (`fill_sign_add`,
+  visible in the render); page grid with live thumbnails, blank-page insertion with live count
+  update, and dirty-state propagation. Filtered logcat showed no fatal errors.
+- The Comments screen was verified on the same emulator: empty state, thread list with author and
+  date, nested reply display, and review-status chip update. A real tap-placement bug was found and
+  fixed during testing (taps without movement never fire pan callbacks; note placement now uses
+  tap-down).
+- Reader interaction overhaul verified on the same emulator: the full page fits the viewport at
+  open (no cropped/oversized render), left/right swipes turn pages, up/down swipes turn pages,
+  pinch-zoom still pans instead of turning, the page counter opens a validated Go-to-page dialog,
+  and a gesture hint is visible until the user learns it. The first swipe-turn attempt exposed the
+  oversized-render bug (816px image in a ~360dp viewport); fixed with fit-scale math covered by
+  `test/page_viewport_test.dart`.
+- Touch-flow rework verified on the same emulator with no raw engine payloads visible anywhere:
+  Edit surface lists all six actions without clipping; Pages grid supports long-press multi-select
+  delete with count bar, drag-or-arrow reorder with per-move undo, and in-grid extract; highlight
+  now searches first and shows a match-count/page/snippet preview before applying, with multi-page
+  undo; signatures (typed and drawn) place through a tap-preview page like dates; compression
+  review shows an Original/Compressed toggle with page navigation before Save As; the Agent sheet
+  routes known requests to reviewed screens and declines the rest in plain words. Verified loops:
+  reorder → "Undo Move page" → redo; highlight → marker on page → "Undid 1 change". No JSON, schema
+  text, workspace paths, or content URIs are shown to the user; results are summarized
+  (`result_summary.dart`) and files are offered through the system Save sheet. Filtered logcat
+  showed no Flutter fatal errors.
 
 ## Verified engineering changes
 

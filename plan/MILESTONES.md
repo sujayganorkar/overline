@@ -1,9 +1,9 @@
 # Engineering milestones
 
-The first product MVP is the complete agreed **manual PDF editing** scope. Features arrive in
-verified slices, but the MVP is not reduced to a reader plus a few edits. The natural-language agent
-and model runtimes are later milestones. Status means demonstrated evidence, not code presence;
-current results are in [`STATUS.md`](STATUS.md).
+The first product MVP is the complete agreed **manual PDF editing** scope plus the first reviewed
+task workflows. Features arrive in verified slices, but the MVP is not reduced to a reader plus a
+few edits. Status means demonstrated evidence, not code presence; current results are in
+[`STATUS.md`](STATUS.md).
 
 ## M0 — reproducible foundation (complete)
 
@@ -46,11 +46,14 @@ path exists.
 
 ## M5 — manual PDF editor product MVP (in progress)
 
-In progress: all upstream automation tools (annotations, pages/files, forms/signatures, redaction,
-OCR, optimize, export, undo/redo) are callable from the app's schema-driven operation browser, and
-`page_rotate` is verified end-to-end on Android. Remaining for the MVP claim: bespoke touch UIs per
-feature group, OCR model-download flow on device, encrypted-fixture password tests, and iOS
-packaging/validation.
+In progress: the four Read / Edit / Organize / Agent surfaces and the persistent canvas command
+button route to reviewed touch flows and the shared operation registry. Bespoke interaction flows
+now include multi-select page deletion, image-to-PDF with reorder, date preview/place/undo,
+target-size compression, compare-and-mark, recipes for dates/phone redaction, form detail matching,
+extractive summary/evidence, autosave/recovery, share, and batch OCR when models are installed.
+Host Rust and Flutter checks pass; the Android release APK builds for ARM64/x86_64. Physical-device
+verification of these newest flows, OCR model installation, encrypted-fixture password tests, and
+iOS packaging/validation remain acceptance work.
 
 Complete the full manual capability set from [`PRODUCT.md`](PRODUCT.md), in testable sub-slices:
 
@@ -69,12 +72,12 @@ The product is intended for Android and iOS. Android is the lead implementation 
 claiming a cross-platform MVP, build and validate the same manual capabilities on macOS/Xcode and
 real iPhone/iPad document providers.
 
-## M6 — optional local agent
+## M6 — optional local model runtime
 
-After the manual operation set is stable, evaluate licensed on-device models/runtimes for reliable
-request-to-operation mapping. Add a constrained planner, previews/confirmation for destructive
-actions, and execution through the existing operation registry. Core editing remains fully usable
-without the model or network.
+After the manual operation set and reviewed deterministic workflows are stable, evaluate licensed
+on-device models/runtimes for broader request-to-operation mapping. Add a constrained planner,
+previews/confirmation for destructive actions, and execution through the existing operation registry.
+Core editing remains fully usable without the model or network.
 
 ## M7 — optional premium cloud intelligence
 

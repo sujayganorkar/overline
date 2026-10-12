@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
+import 'output_saver.dart';
+import 'result_summary.dart';
 
 class OperationBrowser extends StatefulWidget {
   const OperationBrowser({
@@ -12,11 +14,13 @@ class OperationBrowser extends StatefulWidget {
     required this.engine,
     required this.handle,
     required this.onStatusChanged,
+    this.initialQuery = '',
   });
 
   final PdfEngineApi engine;
   final int handle;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
+  final String initialQuery;
 
   @override
   State<OperationBrowser> createState() => _OperationBrowserState();
@@ -28,10 +32,12 @@ class _OperationBrowserState extends State<OperationBrowser> {
   String? _error;
   String? _running;
   String? _result;
+  List<String> _resultPaths = const [];
 
   @override
   void initState() {
     super.initState();
+    _query = widget.initialQuery;
     _loadOperations();
   }
 
@@ -94,6 +100,7 @@ class _OperationBrowserState extends State<OperationBrowser> {
       _running = operation.id;
       _error = null;
       _result = null;
+      _resultPaths = const [];
     });
     try {
       final response = await widget.engine.executeTool(
@@ -103,14 +110,21 @@ class _OperationBrowserState extends State<OperationBrowser> {
       );
       if (!mounted) return;
       widget.onStatusChanged(response.status);
-      final jsonResults = response.contents
+      final resultContents = response.contents
           .where((content) => content.json.isNotEmpty)
-          .map((content) => _prettyJson(content.json))
           .toList(growable: false);
       setState(() {
-        _result = jsonResults.isEmpty
+        _result = resultContents.isEmpty
             ? '${operation.title} completed.'
-            : jsonResults.join('\n\n');
+            : resultContents
+                  .map(
+                    (content) =>
+                        humanizeToolResult(operation.title, content.json),
+                  )
+                  .join('\n\n');
+        _resultPaths = [
+          for (final content in resultContents) ...outputPathsIn(content.json),
+        ];
       });
     } catch (error) {
       if (!mounted) return;
@@ -133,7 +147,9 @@ class _OperationBrowserState extends State<OperationBrowser> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            uri == null ? 'Export cancelled' : 'Export saved to $uri',
+            uri == null
+                ? 'Export cancelled'
+                : 'Saved ${path.split('/').last} through Files',
           ),
         ),
       );
@@ -195,7 +211,7 @@ class _OperationBrowserState extends State<OperationBrowser> {
                     padding: const EdgeInsets.all(12),
                     child: SelectableText(_result!),
                   ),
-                  ..._pathsInResult(_result!).map(
+                  ..._resultPaths.map(
                     (path) => ListTile(
                       leading: const Icon(Icons.download),
                       title: Text(
@@ -264,18 +280,14 @@ Future<Map<String, Object?>?> _operationArguments(
       .toSet();
   final controllers = <String, TextEditingController>{};
   final booleans = <String, bool>{};
+  final selections = <String, Object?>{};
+  final selectionLabels = <String, String>{};
   for (final entry in properties.entries) {
     final property = entry.value as Map<String, dynamic>;
     if (property['type'] == 'boolean') {
       booleans[entry.key] = property['default'] as bool? ?? false;
     } else {
-      controllers[entry.key] = TextEditingController(
-        text: switch (property['type']) {
-          'array' => '[]',
-          'object' => '{}',
-          _ => '',
-        },
-      );
+      controllers[entry.key] = TextEditingController();
     }
   }
   final formKey = GlobalKey<FormState>();
@@ -306,6 +318,8 @@ Future<Map<String, Object?>?> _operationArguments(
                         requiredFields.contains(entry.key),
                         controllers[entry.key],
                         booleans,
+                        selections,
+                        selectionLabels,
                         errors,
                         setDialogState,
                       ),
@@ -330,6 +344,11 @@ Future<Map<String, Object?>?> _operationArguments(
                     output[key] = booleans[key] ?? false;
                     continue;
                   }
+                  if (selections.containsKey(key)) {
+                    output[key] = selections[key];
+                    errors.remove(key);
+                    continue;
+                  }
                   final text = controllers[key]!.text.trim();
                   if (text.isEmpty) {
                     if (requiredFields.contains(key)) {
@@ -339,11 +358,15 @@ Future<Map<String, Object?>?> _operationArguments(
                     continue;
                   }
                   try {
-                    output[key] = _parseArgument(text, property);
+                    final parsed = _parseArgument(text, property, name: key);
+                    final description =
+                        property['description'] as String? ?? '';
+                    output[key] = _isOutputPath(key, description)
+                        ? _workspaceOutputPath(parsed.toString())
+                        : parsed;
                     errors.remove(key);
                   } catch (_) {
-                    errors[key] =
-                        'Enter a valid ${property['type'] ?? 'value'}';
+                    errors[key] = 'Check this value and its format.';
                     valid = false;
                   }
                 }
@@ -374,129 +397,274 @@ Widget _argumentField(
   bool required,
   TextEditingController? controller,
   Map<String, bool> booleans,
+  Map<String, Object?> selections,
+  Map<String, String> selectionLabels,
   Map<String, String> errors,
   StateSetter setDialogState,
 ) {
   final type = schema['type'] as String?;
-  final enumValues = schema['enum'] as List<dynamic>?;
   if (type == 'boolean') {
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(name),
+      title: Text(_argumentLabel(name)),
       value: booleans[name] ?? false,
       onChanged: (value) => setDialogState(() => booleans[name] = value),
     );
   }
+  final enumValues = schema['enum'] as List<dynamic>?;
+  if (enumValues != null && enumValues.every((value) => value is String)) {
+    final options = enumValues.cast<String>();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DropdownButtonFormField<String>(
+        initialValue: selections[name] as String?,
+        decoration: InputDecoration(
+          labelText: required
+              ? '${_argumentLabel(name)} *'
+              : _argumentLabel(name),
+          errorText: errors[name],
+          border: const OutlineInputBorder(),
+        ),
+        items: [
+          for (final option in options)
+            DropdownMenuItem(value: option, child: Text(option)),
+        ],
+        onChanged: (value) => setDialogState(() {
+          if (value == null) {
+            selections.remove(name);
+          } else {
+            selections[name] = value;
+          }
+          errors.remove(name);
+        }),
+      ),
+    );
+  }
+
   final fileArrayInput = name == 'paths' && type == 'array';
-  final fileInput =
-      fileArrayInput || {'file', 'image', 'input_file', 'path'}.contains(name);
+  final description = (schema['description'] as String? ?? '').toLowerCase();
+  final inputFile =
+      {'file', 'image', 'input_file', 'other_file'}.contains(name) ||
+      (name == 'path' &&
+          (description.contains('source file') ||
+              description.contains('input file') ||
+              description.contains('file to compare')));
+  final fileInput = fileArrayInput || inputFile;
+  if (fileInput) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: OutlinedButton.icon(
+        onPressed: () async {
+          final picked = await FilePickerPlatform.instance.pickFiles(
+            type: FileType.any,
+          );
+          if (picked.isEmpty) return;
+          if (fileArrayInput) {
+            final paths = <String>[];
+            final names = <String>[];
+            for (final file in picked) {
+              final bytes = await file.readAsBytes();
+              paths.add(await engine.stageFile(name: file.name, bytes: bytes));
+              names.add(file.name);
+            }
+            setDialogState(() {
+              selections[name] = paths;
+              selectionLabels[name] = names.join(', ');
+              controller?.text = '${names.length} files selected';
+              errors.remove(name);
+            });
+            return;
+          }
+          final file = picked.first;
+          final bytes = await file.readAsBytes();
+          final path = await engine.stageFile(name: file.name, bytes: bytes);
+          setDialogState(() {
+            selections[name] = path;
+            selectionLabels[name] = file.name;
+            controller?.text = file.name;
+            errors.remove(name);
+          });
+        },
+        icon: const Icon(Icons.attach_file),
+        label: Text(
+          selectionLabels[name] ??
+              (fileArrayInput ? 'Choose files' : 'Choose a file'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
+  }
+
+  final outputPath =
+      {'path', 'out', 'folder', 'out_dir'}.contains(name) &&
+      (description.contains('write') ||
+          description.contains('output') ||
+          description.contains('folder'));
+  final typeLabel = _schemaType(schema['type']);
+  final helper = outputPath
+      ? 'Name the result; it will be offered to save when the task finishes.'
+      : typeLabel == 'array'
+      ? (name == 'pages'
+            ? 'Enter page numbers or ranges, for example 1, 3, 5-7.'
+            : 'Enter one value per line or separate values with commas.')
+      : typeLabel == 'object'
+      ? 'Enter one setting per line, for example: quality: 70.'
+      : (schema['description'] as String?);
   return Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: TextField(
       controller: controller,
-      keyboardType: type == 'integer' || type == 'number'
+      keyboardType: typeLabel == 'integer' || typeLabel == 'number'
           ? const TextInputType.numberWithOptions(decimal: true, signed: true)
-          : type == 'array' || type == 'object'
+          : typeLabel == 'array' || typeLabel == 'object'
           ? TextInputType.multiline
           : TextInputType.text,
-      minLines: type == 'array' || type == 'object' ? 2 : 1,
-      maxLines: type == 'array' || type == 'object' ? 4 : 1,
+      minLines: typeLabel == 'array' || typeLabel == 'object' ? 2 : 1,
+      maxLines: typeLabel == 'array' || typeLabel == 'object' ? 4 : 1,
       decoration: InputDecoration(
-        labelText: required ? '$name *' : name,
-        helperText: enumValues == null
-            ? (type == 'array' || type == 'object' ? 'JSON input' : null)
-            : 'Options: ${enumValues.join(', ')}',
+        labelText: required
+            ? '${_argumentLabel(name)} *'
+            : _argumentLabel(name),
+        helperText: helper,
+        hintText: outputPath
+            ? (name == 'folder' || name == 'out_dir'
+                  ? 'processed-files'
+                  : 'result.pdf')
+            : null,
         errorText: errors[name],
         border: const OutlineInputBorder(),
-        suffixIcon: fileInput
-            ? IconButton(
-                tooltip: 'Choose supporting files',
-                icon: const Icon(Icons.attach_file),
-                onPressed: () async {
-                  final picked = await FilePickerPlatform.instance.pickFiles(
-                    type: FileType.any,
-                  );
-                  if (picked.isEmpty) return;
-                  if (fileArrayInput) {
-                    final paths = <String>[];
-                    for (final file in picked) {
-                      final bytes = await file.readAsBytes();
-                      paths.add(
-                        await engine.stageFile(name: file.name, bytes: bytes),
-                      );
-                    }
-                    controller?.text = jsonEncode(paths);
-                    return;
-                  }
-                  final file = picked.first;
-                  final bytes = await file.readAsBytes();
-                  final path = await engine.stageFile(
-                    name: file.name,
-                    bytes: bytes,
-                  );
-                  controller?.text = path;
-                },
-              )
-            : null,
       ),
     ),
   );
 }
 
-Object _parseArgument(String value, Map<String, dynamic> schema) {
-  final type = schema['type'];
-  if (schema.containsKey('oneOf') ||
-      schema.containsKey('anyOf') ||
-      type is List) {
-    return jsonDecode(value) as Object;
-  }
+Object _parseArgument(
+  String value,
+  Map<String, dynamic> schema, {
+  String name = '',
+}) {
+  final type = _schemaType(schema['type']);
   switch (type) {
     case 'integer':
       return int.parse(value);
     case 'number':
       return double.parse(value);
     case 'array':
+      final items = schema['items'] as Map<String, dynamic>? ?? const {};
+      if (name == 'pages' && _schemaType(items['type']) == 'integer') {
+        return _parsePageRanges(value);
+      }
+      final values = value
+          .split(items['type'] == 'array' ? '\n' : RegExp(r'[,\n]'))
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty);
+      return values
+          .map((item) {
+            if (_schemaType(items['type']) == 'array') {
+              final nested =
+                  items['items'] as Map<String, dynamic>? ?? const {};
+              return item
+                  .split(',')
+                  .map((value) => _parseArgument(value.trim(), nested))
+                  .toList(growable: false);
+            }
+            return _parseArgument(item, items);
+          })
+          .toList(growable: false);
     case 'object':
-      return jsonDecode(value) as Object;
+      final fields = schema['properties'] as Map<String, dynamic>? ?? const {};
+      if (fields.isEmpty) {
+        throw const FormatException(
+          'This advanced setting has no simple editor.',
+        );
+      }
+      final output = <String, Object?>{};
+      for (final line in value.split('\n')) {
+        final separator = line.indexOf(RegExp(r'[:=]'));
+        if (separator <= 0) continue;
+        final key = line.substring(0, separator).trim();
+        final childSchema = fields[key];
+        if (childSchema is! Map<String, dynamic>) {
+          throw FormatException('Unknown setting: $key');
+        }
+        output[key] = _parseArgument(
+          line.substring(separator + 1).trim(),
+          childSchema,
+          name: key,
+        );
+      }
+      if (output.isEmpty) {
+        throw const FormatException('Enter at least one setting.');
+      }
+      return output;
     case 'boolean':
-      return value.toLowerCase() == 'true';
+      if (value.toLowerCase() == 'true' || value.toLowerCase() == 'yes') {
+        return true;
+      }
+      if (value.toLowerCase() == 'false' || value.toLowerCase() == 'no') {
+        return false;
+      }
+      throw const FormatException('Enter yes or no.');
     default:
+      final allowed = schema['enum'];
+      if (allowed is List && !allowed.contains(value)) {
+        throw FormatException('Choose one of: ${allowed.join(', ')}.');
+      }
       return value;
   }
 }
 
-String _prettyJson(String source) {
-  try {
-    return const JsonEncoder.withIndent('  ').convert(jsonDecode(source));
-  } catch (_) {
-    return source;
+String _schemaType(Object? value) {
+  if (value is String) return value;
+  if (value is List) {
+    return value.whereType<String>().firstWhere(
+      (type) => type != 'null',
+      orElse: () => 'string',
+    );
   }
+  return 'string';
 }
 
-List<String> _pathsInResult(String source) {
-  try {
-    final value = jsonDecode(source);
-    final paths = <String>[];
-    void visit(Object? node) {
-      if (node is Map<String, dynamic>) {
-        for (final entry in node.entries) {
-          if (entry.key == 'path' && entry.value is String) {
-            paths.add(entry.value as String);
-          }
-          visit(entry.value);
-        }
-      } else if (node is List) {
-        for (final item in node) {
-          visit(item);
-        }
-      }
+List<int> _parsePageRanges(String source) {
+  final pages = <int>{};
+  for (final part in source.split(',')) {
+    final range = part.trim().split('-');
+    final start = int.tryParse(range.first.trim());
+    final end = range.length > 1 ? int.tryParse(range.last.trim()) : start;
+    if (start == null || end == null || end < start) {
+      throw const FormatException('Use page numbers or ranges like 2-4, 7.');
     }
-
-    visit(value);
-    return paths.toSet().toList(growable: false);
-  } catch (_) {
-    return const [];
+    if (end - start > 10000) {
+      throw const FormatException('The page range is too large.');
+    }
+    for (var page = start; page <= end; page++) {
+      pages.add(page);
+    }
   }
+  return pages.toList()..sort();
+}
+
+String _argumentLabel(String name) {
+  if (name == 'at') return 'Position on page';
+  if (name == 'path' || name == 'out') return 'Output file name';
+  return name
+      .replaceAll('_', ' ')
+      .replaceAllMapped(
+        RegExp(r'\b[a-z]'),
+        (match) => match.group(0)!.toUpperCase(),
+      );
+}
+
+bool _isOutputPath(String name, String description) =>
+    {'path', 'out', 'folder', 'out_dir'}.contains(name) &&
+    (description.toLowerCase().contains('write') ||
+        description.toLowerCase().contains('output') ||
+        description.toLowerCase().contains('folder'));
+
+String _workspaceOutputPath(String value) {
+  final clean = value.replaceAll(RegExp(r'^/+'), '');
+  return clean.startsWith('outputs/') ? clean : 'outputs/$clean';
 }
 
 String _mimeType(String path) {
