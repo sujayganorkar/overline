@@ -301,9 +301,10 @@ class _FormScreenState extends State<FormScreen> {
       );
       if (!mounted) return;
       widget.onStatusChanged(response.status);
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Form saved')));
+      Navigator.pop(context, true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Form values applied to document')),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -342,7 +343,7 @@ class _FormScreenState extends State<FormScreen> {
               PopupMenuItem(value: 'import', child: Text('Import values')),
             ],
           ),
-          TextButton(
+          FilledButton.tonal(
             onPressed: _saving || _loading ? null : _save,
             child: _saving
                 ? const SizedBox(
@@ -350,7 +351,7 @@ class _FormScreenState extends State<FormScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Save'),
+                : const Text('Apply'),
           ),
         ],
       ),

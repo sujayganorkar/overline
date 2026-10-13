@@ -45,6 +45,9 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
   Offset? _draftPositionPx;
   bool _busy = false;
   String? _error;
+  bool _hasPlaced = false;
+  List<double>? _lastPlacedPt;
+  bool _hasPlacedDate = false;
 
   @override
   void initState() {
@@ -123,6 +126,9 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
       setState(() {
         _pagePng = updated;
         _draftPositionPx = null;
+        _hasPlaced = true;
+        _lastPlacedPt = at;
+        _hasPlacedDate = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -150,9 +156,59 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
         page1Based: _page,
         dpi: _dpi,
       );
-      if (mounted) setState(() => _pagePng = png);
+      if (mounted) {
+        setState(() {
+          _pagePng = png;
+          _hasPlaced = false;
+          _lastPlacedPt = null;
+          _hasPlacedDate = false;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = 'Undo failed: $error');
+    }
+  }
+
+  Future<void> _adjustPlacement() async {
+    await _undo();
+  }
+
+  Future<void> _addDate() async {
+    final pt = _lastPlacedPt;
+    if (_busy || pt == null) return;
+    final dateAt = [pt[0], pt[1] + 28.0];
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final response = await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'fill_sign_add',
+        argumentsJson: jsonEncode({
+          'page': _page,
+          'type': 'date',
+          'at': dateAt,
+        }),
+      );
+      widget.onStatusChanged(response.status);
+      final updated = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: _page,
+        dpi: _dpi,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pagePng = updated;
+        _hasPlacedDate = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Date added below signature.')),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Could not add date: $error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -160,17 +216,29 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
   Widget build(BuildContext context) {
     final typedText = widget.typedText;
     final drawnImage = widget.imageBytes;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Place signature'),
-        actions: [
-          IconButton(
-            tooltip: 'Close without placing',
-            onPressed: _busy ? null : () => Navigator.pop(context),
-            icon: const Icon(Icons.close),
-          ),
-        ],
-      ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        Navigator.pop(context, _hasPlaced ? 'done' : null);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_hasPlaced ? 'Signature placed' : 'Place signature'),
+          actions: [
+            if (_hasPlaced)
+              TextButton(
+                onPressed: _busy ? null : () => Navigator.pop(context, 'done'),
+                child: const Text('Done'),
+              )
+            else
+              IconButton(
+                tooltip: 'Close without placing',
+                onPressed: _busy ? null : () => Navigator.pop(context),
+                icon: const Icon(Icons.close),
+              ),
+          ],
+        ),
       body: Column(
         children: [
           if (_busy) const LinearProgressIndicator(),
@@ -300,29 +368,78 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
                         ),
                       ],
                     ),
-                    Text(
-                      _error ??
-                          (_draftPositionPx == null
-                              ? 'Tap the page to preview the signature.'
-                              : 'Check the placement. Tap elsewhere to move it.'),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _busy || _draftPositionPx == null
-                            ? null
-                            : _place,
-                        icon: const Icon(Icons.draw_outlined),
-                        label: Text(
-                          _draftPositionPx == null
-                              ? 'Choose a position'
-                              : 'Place signature',
+                    if (_hasPlaced) ...[
+                      Text(
+                        _error ?? 'Signature placed. Adjust, add date, or finish and share.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _busy ? null : _adjustPlacement,
+                              icon: const Icon(Icons.tune, size: 18),
+                              label: const Text('Adjust'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _busy || _hasPlacedDate ? null : _addDate,
+                              icon: const Icon(Icons.calendar_today_outlined, size: 18),
+                              label: Text(_hasPlacedDate ? 'Date added' : 'Add date'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: FilledButton.tonal(
+                              onPressed: _busy ? null : () => Navigator.pop(context, 'done'),
+                              child: const Text('Done'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 3,
+                            child: FilledButton.icon(
+                              onPressed: _busy ? null : () => Navigator.pop(context, 'share'),
+                              icon: const Icon(Icons.share_outlined, size: 18),
+                              label: const Text('Done & Share'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ] else ...[
+                      Text(
+                        _error ??
+                            (_draftPositionPx == null
+                                ? 'Tap the page to preview the signature.'
+                                : 'Check the placement. Tap elsewhere to move it.'),
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _busy || _draftPositionPx == null
+                              ? null
+                              : _place,
+                          icon: const Icon(Icons.draw_outlined),
+                          label: Text(
+                            _draftPositionPx == null
+                                ? 'Choose a position'
+                                : 'Place signature',
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -330,6 +447,7 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -84,6 +85,7 @@ class AnnotatePage extends StatefulWidget {
     required this.imageHeightPx,
     required this.dpi,
     this.initialMode = AnnotateMode.ink,
+    this.onStatusChanged,
   });
 
   final PdfEngineApi engine;
@@ -94,6 +96,7 @@ class AnnotatePage extends StatefulWidget {
   final double imageHeightPx;
   final int dpi;
   final AnnotateMode initialMode;
+  final ValueChanged<bridge.DocumentStatus>? onStatusChanged;
 
   @override
   State<AnnotatePage> createState() => _AnnotatePageState();
@@ -125,6 +128,8 @@ class _AnnotatePageState extends State<AnnotatePage> {
   String _selectKind = 'highlight';
   int? _selectionAnchorLine;
   int? _selectionExtentLine;
+  int _appliedCount = 0;
+  bridge.DocumentStatus? _lastStatus;
 
   bool get _dedicatedMode =>
       widget.initialMode == AnnotateMode.note ||
@@ -927,11 +932,94 @@ class _AnnotatePageState extends State<AnnotatePage> {
         tool: tool,
         argumentsJson: geo.encodeArgs(args),
       );
+      _lastStatus = response.status;
+      widget.onStatusChanged?.call(response.status);
+
+      final updatedPng = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: widget.page,
+        dpi: widget.dpi,
+      );
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromList(updatedPng, (image) {
+        if (!completer.isCompleted) completer.complete(image);
+      });
+      final newImage = await completer.future;
+
       if (!mounted) return;
-      Navigator.pop(context, response.status);
+      setState(() {
+        _baseImage = newImage;
+        _strokes.clear();
+        _currentStroke = <Offset>[];
+        _shapes.clear();
+        _dragStart = null;
+        _measurePoints.clear();
+        _selectionAnchorLine = null;
+        _selectionExtentLine = null;
+        _appliedCount++;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _appliedCount == 1
+                ? 'Annotation applied. Add more or tap Done when finished.'
+                : 'Annotation $_appliedCount applied.',
+          ),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: _undoLastAnnotation,
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _undoLastAnnotation() async {
+    if (_appliedCount <= 0 || _saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final response = await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'edit_undo',
+        argumentsJson: '{}',
+      );
+      _lastStatus = response.status;
+      widget.onStatusChanged?.call(response.status);
+
+      final updatedPng = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: widget.page,
+        dpi: widget.dpi,
+      );
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromList(updatedPng, (image) {
+        if (!completer.isCompleted) completer.complete(image);
+      });
+      final newImage = await completer.future;
+
+      if (!mounted) return;
+      setState(() {
+        _baseImage = newImage;
+        _appliedCount--;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Annotation undone.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Undo failed: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1051,39 +1139,65 @@ class _AnnotatePageState extends State<AnnotatePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _mode == AnnotateMode.pan
-              ? 'Pan & zoom · page ${widget.page}'
-              : _mode == AnnotateMode.select
-              ? 'Select text · page ${widget.page}'
-              : _mode == AnnotateMode.note
-              ? 'Add a note · page ${widget.page}'
-              : _mode == AnnotateMode.stamp
-              ? 'Place a stamp · page ${widget.page}'
-              : _mode == AnnotateMode.image
-              ? 'Place a picture · page ${widget.page}'
-              : 'Annotate page ${widget.page}',
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        Navigator.pop(context, _lastStatus);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: _appliedCount > 0 ? 'Done with annotations' : 'Back',
+            onPressed: () => Navigator.pop(context, _lastStatus),
+          ),
+          title: Text(
+            _mode == AnnotateMode.pan
+                ? 'Pan & zoom · page ${widget.page}'
+                : _mode == AnnotateMode.select
+                ? 'Select text · page ${widget.page}'
+                : _mode == AnnotateMode.note
+                ? 'Add a note · page ${widget.page}'
+                : _mode == AnnotateMode.stamp
+                ? 'Place a stamp · page ${widget.page}'
+                : _mode == AnnotateMode.image
+                ? 'Place a picture · page ${widget.page}'
+                : 'Annotate page ${widget.page}',
+          ),
+          actions: [
+            if (_appliedCount > 0)
+              IconButton(
+                tooltip: 'Undo last annotation',
+                icon: const Icon(Icons.undo),
+                onPressed: _saving ? null : _undoLastAnnotation,
+              ),
+            if (!_tapModes.contains(_mode))
+              TextButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(
+                        _mode == AnnotateMode.select
+                            ? 'Highlight selection'
+                            : 'Apply',
+                      ),
+              ),
+            if (_appliedCount > 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: FilledButton.tonal(
+                  onPressed: _saving ? null : () => Navigator.pop(context, _lastStatus),
+                  child: const Text('Done'),
+                ),
+              ),
+            const SizedBox(width: 4),
+          ],
         ),
-        actions: [
-          if (!_tapModes.contains(_mode))
-            TextButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(
-                      _mode == AnnotateMode.select
-                          ? 'Highlight selection'
-                          : 'Save',
-                    ),
-            ),
-        ],
-      ),
       body: Column(
         children: [
           if (!_dedicatedMode) _toolClusters(),
@@ -1309,32 +1423,38 @@ class _AnnotatePageState extends State<AnnotatePage> {
                                       left:
                                           (anchor ? rect.left : rect.right) *
                                               fitScale -
-                                          22,
-                                      top: rect.bottom * fitScale - 22,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onPanUpdate: (details) =>
-                                            _moveSelectionHandle(
-                                              details: details,
-                                              paintContext: paintContext,
-                                              fitScale: fitScale,
-                                              anchor: anchor,
-                                            ),
-                                        child: SizedBox(
-                                          width: 44,
-                                          height: 44,
-                                          child: Center(
-                                            child: Container(
-                                              width: 16,
-                                              height: 16,
-                                              decoration: BoxDecoration(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .primary,
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color: Colors.white,
-                                                  width: 2,
+                                          24,
+                                      top: rect.bottom * fitScale - 24,
+                                      child: Semantics(
+                                        label: anchor
+                                            ? 'Start text selection handle'
+                                            : 'End text selection handle',
+                                        slider: true,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onPanUpdate: (details) =>
+                                              _moveSelectionHandle(
+                                                details: details,
+                                                paintContext: paintContext,
+                                                fitScale: fitScale,
+                                                anchor: anchor,
+                                              ),
+                                          child: SizedBox(
+                                            width: 48,
+                                            height: 48,
+                                            child: Center(
+                                              child: Container(
+                                                width: 18,
+                                                height: 18,
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                  shape: BoxShape.circle,
+                                                  border: Border.all(
+                                                    color: Colors.white,
+                                                    width: 2,
+                                                  ),
                                                 ),
                                               ),
                                             ),
@@ -1418,7 +1538,8 @@ class _AnnotatePageState extends State<AnnotatePage> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 }
 

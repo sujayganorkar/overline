@@ -59,6 +59,13 @@ class PdfCraftApp extends StatelessWidget {
   }
 }
 
+enum WorkflowOutcome {
+  completed,
+  cancelled,
+  failed,
+  needsInput,
+}
+
 class ViewerPage extends StatefulWidget {
   const ViewerPage({super.key, required this.engineFactory});
 
@@ -128,32 +135,63 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         _status = 'Engine ready (PdfCraft Rust core)';
       });
       unawaited(_offerRecovery(engine));
+      _setupNativeChannels();
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Engine init failed: $e');
     }
   }
 
-  Future<void> _open() async {
+  void _setupNativeChannels() {
+    const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+    channel.setMethodCallHandler((call) async {
+      if (call.method == 'onPdfReceived') {
+        final args = call.arguments;
+        if (args is Map) {
+          final name = args['name'] as String?;
+          final path = args['path'] as String?;
+          if (name != null && path != null) {
+            await _openIncomingPdf(name, path);
+          }
+        }
+      }
+    });
+
+    channel.invokeMethod<Map<Object?, Object?>>('getInitialPdf').then((pdf) {
+      if (pdf != null) {
+        final name = pdf['name'] as String?;
+        final path = pdf['path'] as String?;
+        if (name != null && path != null) {
+          _openIncomingPdf(name, path);
+        }
+      }
+    }).catchError((_) {});
+  }
+
+  Future<void> _openIncomingPdf(String name, String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) return;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) return;
+      await _openDocumentBytes(name, bytes);
+    } catch (e) {
+      debugPrint('Could not open incoming PDF: $e');
+    }
+  }
+
+  Future<void> _openDocumentBytes(String name, Uint8List bytes) async {
+    if (!await _confirmReplacingCurrent()) return;
+    setState(() {
+      _busy = true;
+      _status = 'Opening $name\u2026';
+    });
+    final engine = _engine;
+    if (engine == null) throw StateError('engine not initialized');
+    final previousDoc = _doc;
     int? openedDoc;
     try {
-      final files = await FilePickerPlatform.instance.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
-      if (!mounted || files.isEmpty) return;
-      final file = files.first;
-      final fileBytes = await file.readAsBytes();
-      if (!mounted || fileBytes.isEmpty) return;
-      if (!await _confirmReplacingCurrent()) return;
-      setState(() {
-        _busy = true;
-        _status = 'Opening ${file.name}\u2026';
-      });
-      final engine = _engine;
-      if (engine == null) throw StateError('engine not initialized');
-      final previousDoc = _doc;
-      openedDoc = await _openDocument(engine, file.name, fileBytes);
+      openedDoc = await _openDocument(engine, name, bytes);
       if (openedDoc == null) {
         if (mounted) setState(() => _status = 'Open cancelled');
         return;
@@ -166,13 +204,13 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       }
       setState(() {
         _doc = openedDoc;
-        _name = file.name;
+        _name = name;
         _pageCount = count;
         _page = 1;
         _dirty = status.dirty;
         _recoveredUnsaved = false;
         _recoveryAvailable = false;
-        _status = 'Opened ${file.name}';
+        _status = 'Opened $name';
       });
       await _clearRecoveryCheckpoint();
       if (previousDoc != null) {
@@ -186,9 +224,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       unawaited(
         _recentStore
             .recordOpened(
-              name: file.name,
+              name: name,
               pageCount: count,
-              bytes: fileBytes,
+              bytes: bytes,
             )
             .then((_) => _loadRecents()),
       );
@@ -209,6 +247,23 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _open() async {
+    try {
+      final files = await FilePickerPlatform.instance.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
+      if (!mounted || files.isEmpty) return;
+      final file = files.first;
+      final fileBytes = await file.readAsBytes();
+      if (!mounted || fileBytes.isEmpty) return;
+      await _openDocumentBytes(file.name, fileBytes);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = 'Open failed: $e');
+    }
+  }
+
   Future<void> _openRecent(RecentDocumentEntry entry) async {
     if (_busy || entry.cachedFilePath == null) return;
     final file = File(entry.cachedFilePath!);
@@ -224,67 +279,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
     final bytes = await file.readAsBytes();
     if (bytes.isEmpty) return;
-    if (!await _confirmReplacingCurrent()) return;
-
-    setState(() {
-      _busy = true;
-      _status = 'Opening ${entry.name}\u2026';
-    });
-    int? openedDoc;
-    try {
-      final engine = _engine;
-      if (engine == null) throw StateError('engine not initialized');
-      final previousDoc = _doc;
-      openedDoc = await _openDocument(engine, entry.name, bytes);
-      if (openedDoc == null) {
-        if (mounted) setState(() => _status = 'Open cancelled');
-        return;
-      }
-      final count = await engine.pageCount(handle: openedDoc);
-      final status = await engine.status(handle: openedDoc);
-      if (!mounted) {
-        await engine.close(handle: openedDoc);
-        return;
-      }
-      setState(() {
-        _doc = openedDoc;
-        _name = entry.name;
-        _pageCount = count;
-        _page = 1;
-        _dirty = status.dirty;
-        _recoveredUnsaved = false;
-        _recoveryAvailable = false;
-        _status = 'Opened ${entry.name}';
-      });
-      await _clearRecoveryCheckpoint();
-      if (previousDoc != null) {
-        try {
-          await engine.close(handle: previousDoc);
-        } catch (error) {
-          debugPrint('Could not close previous PDF document: $error');
-        }
-      }
-      await _render();
-      unawaited(
-        _recentStore
-            .recordOpened(
-              name: entry.name,
-              pageCount: count,
-              bytes: bytes,
-            )
-            .then((_) => _loadRecents()),
-      );
-    } catch (e) {
-      if (openedDoc != null) {
-        try {
-          await _engine?.close(handle: openedDoc);
-        } catch (_) {}
-      }
-      if (!mounted) return;
-      setState(() => _status = 'Open failed: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await _openDocumentBytes(entry.name, bytes);
   }
 
   Future<bool> _confirmReplacingCurrent() async {
@@ -515,6 +510,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   Future<void> _goto(int page) async {
     if (page < 1 || page > _pageCount || page == _page) return;
     _page = page;
+    _textSelectionAnchor = null;
+    _textSelectionExtent = null;
     _viewerTransform.value = Matrix4.identity();
     await _render();
   }
@@ -784,10 +781,20 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         setState(() => _status = 'Save cancelled');
       } else {
         externalSaved = true;
+        final savedBytes = snapshot.bytes;
         await engine.commitSave(handle: doc, token: snapshot.token);
         snapshot = null;
         final status = await engine.status(handle: doc);
         await _clearRecoveryCheckpoint();
+        unawaited(
+          _recentStore
+              .recordOpened(
+                name: _name!,
+                pageCount: _pageCount,
+                bytes: savedBytes,
+              )
+              .then((_) => _loadRecents()),
+        );
         if (!mounted) return;
         setState(() {
           _dirty = status.dirty;
@@ -1142,6 +1149,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             imageHeightPx: size.height * _annotateDpi / 72.0,
             dpi: _annotateDpi,
             initialMode: initialMode,
+            onStatusChanged: _onOperationStatus,
           ),
         ),
       );
@@ -1154,10 +1162,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _highlightPhrase() async {
+  Future<WorkflowOutcome> _highlightPhrase() async {
     final doc = _doc;
     final engine = _engine;
-    if (doc == null || engine == null) return;
+    if (doc == null || engine == null) return WorkflowOutcome.failed;
     final controller = TextEditingController();
     var allMatches = true;
     var entireDocument = false;
@@ -1209,8 +1217,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           ),
         ),
       );
-      if (entered != true) return;
-      if (!mounted) return;
+      if (entered != true) return WorkflowOutcome.cancelled;
+      if (!mounted) return WorkflowOutcome.cancelled;
       final phrase = controller.text.trim();
       if (phrase.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1218,7 +1226,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             content: Text('Enter the words you want to highlight.'),
           ),
         );
-        return;
+        return WorkflowOutcome.cancelled;
       }
       setState(() => _busy = true);
       bridge.DocumentStatus? latestStatus;
@@ -1284,12 +1292,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
               const SnackBar(content: Text('No matches found in this PDF.')),
             );
           }
-          return;
+          return WorkflowOutcome.cancelled;
         }
         final matchCount = allMatches
             ? visibleMatches.length
             : matchingPages.length;
-        if (!mounted) return;
+        if (!mounted) return WorkflowOutcome.cancelled;
         final approved = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -1330,7 +1338,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             ],
           ),
         );
-        if (approved != true || !mounted) return;
+        if (approved != true || !mounted) return WorkflowOutcome.cancelled;
         setState(() => _status = 'Adding reviewed highlights…');
         for (final page in matchingPages) {
           final response = await engine.executeTool(
@@ -1345,7 +1353,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           );
           latestStatus = response.status;
         }
-        if (!mounted) return;
+        if (!mounted) return WorkflowOutcome.completed;
         if (latestStatus != null) _onOperationStatus(latestStatus);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1358,10 +1366,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             ),
           ),
         );
+        return WorkflowOutcome.completed;
       } catch (e) {
-        if (!mounted) return;
+        if (!mounted) return WorkflowOutcome.failed;
         if (latestStatus != null) _onOperationStatus(latestStatus);
         setState(() => _status = 'Highlight failed: $e');
+        return WorkflowOutcome.failed;
       } finally {
         if (mounted) setState(() => _busy = false);
       }
@@ -1370,11 +1380,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _openForms() async {
+  Future<WorkflowOutcome> _openForms() async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null || doc == null) return;
-    await Navigator.push<void>(
+    if (engine == null || doc == null) return WorkflowOutcome.failed;
+    final applied = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (context) => FormScreen(
@@ -1384,16 +1394,19 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         ),
       ),
     );
+    return applied == true
+        ? WorkflowOutcome.completed
+        : WorkflowOutcome.cancelled;
   }
 
-  Future<void> _openSignature() async {
+  Future<WorkflowOutcome> _openSignature() async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null || doc == null) return;
+    if (engine == null || doc == null) return WorkflowOutcome.failed;
     final store = SignatureStore();
     final savedTyped = await store.loadTypedName();
     final savedDrawn = await store.loadDrawn();
-    if (!mounted) return;
+    if (!mounted) return WorkflowOutcome.cancelled;
     final choice = await showModalBottomSheet<String>(
       context: context,
       useSafeArea: true,
@@ -1485,10 +1498,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         ),
       ),
     );
-    if (!mounted || choice == null) return;
+    if (!mounted || choice == null) return WorkflowOutcome.cancelled;
     if (choice == 'date') {
       await _openQuickMark();
-      return;
+      return WorkflowOutcome.completed;
     }
     if (choice == 'mark') {
       final mark = await showModalBottomSheet<({String type, String label})>(
@@ -1516,12 +1529,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           ),
         ),
       );
-      if (!mounted || mark == null) return;
+      if (!mounted || mark == null) return WorkflowOutcome.cancelled;
       await _openQuickMark(markType: mark.type, markLabel: mark.label);
-      return;
+      return WorkflowOutcome.completed;
     }
     if (choice == 'saved_typed' && savedTyped != null) {
-      await Navigator.push<void>(
+      final outcome = await Navigator.push<String>(
         context,
         MaterialPageRoute(
           builder: (context) => SignaturePlacementPage(
@@ -1534,7 +1547,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           ),
         ),
       );
-      return;
+      if (outcome == 'share' && mounted) {
+        await _shareCurrentPdf();
+      }
+      return outcome != null
+          ? WorkflowOutcome.completed
+          : WorkflowOutcome.cancelled;
     }
     if (choice == 'saved_drawn' && savedDrawn != null) {
       setState(() => _busy = true);
@@ -1543,8 +1561,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           name: 'signature.png',
           bytes: savedDrawn,
         );
-        if (!mounted) return;
-        await Navigator.push<void>(
+        if (!mounted) return WorkflowOutcome.cancelled;
+        final outcome = await Navigator.push<String>(
           context,
           MaterialPageRoute(
             builder: (context) => SignaturePlacementPage(
@@ -1558,13 +1576,19 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             ),
           ),
         );
+        if (outcome == 'share' && mounted) {
+          await _shareCurrentPdf();
+        }
+        return outcome != null
+            ? WorkflowOutcome.completed
+            : WorkflowOutcome.cancelled;
       } catch (e) {
-        if (!mounted) return;
+        if (!mounted) return WorkflowOutcome.failed;
         setState(() => _status = 'Signature failed: $e');
+        return WorkflowOutcome.failed;
       } finally {
         if (mounted) setState(() => _busy = false);
       }
-      return;
     }
     if (choice == 'draw') {
       final png = await showModalBottomSheet<Uint8List>(
@@ -1573,7 +1597,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         useSafeArea: true,
         builder: (context) => const SignaturePad(),
       );
-      if (!mounted || png == null || png.isEmpty) return;
+      if (!mounted || png == null || png.isEmpty) {
+        return WorkflowOutcome.cancelled;
+      }
       await store.saveDrawn(png);
       setState(() => _busy = true);
       try {
@@ -1581,8 +1607,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           name: 'signature.png',
           bytes: png,
         );
-        if (!mounted) return;
-        await Navigator.push<void>(
+        if (!mounted) return WorkflowOutcome.cancelled;
+        final outcome = await Navigator.push<String>(
           context,
           MaterialPageRoute(
             builder: (context) => SignaturePlacementPage(
@@ -1596,13 +1622,19 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             ),
           ),
         );
+        if (outcome == 'share' && mounted) {
+          await _shareCurrentPdf();
+        }
+        return outcome != null
+            ? WorkflowOutcome.completed
+            : WorkflowOutcome.cancelled;
       } catch (e) {
-        if (!mounted) return;
+        if (!mounted) return WorkflowOutcome.failed;
         setState(() => _status = 'Signature failed: $e');
+        return WorkflowOutcome.failed;
       } finally {
         if (mounted) setState(() => _busy = false);
       }
-      return;
     }
     if (choice == 'type') {
       final name = await showModalBottomSheet<String>(
@@ -1611,10 +1643,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         useSafeArea: true,
         builder: (context) => const SignatureSheet(),
       );
-      if (!mounted || name == null || name.trim().isEmpty) return;
+      if (!mounted || name == null || name.trim().isEmpty) {
+        return WorkflowOutcome.cancelled;
+      }
       await store.saveTypedName(name.trim());
-      if (!mounted) return;
-      await Navigator.push<void>(
+      if (!mounted) return WorkflowOutcome.cancelled;
+      final outcome = await Navigator.push<String>(
         context,
         MaterialPageRoute(
           builder: (context) => SignaturePlacementPage(
@@ -1627,13 +1661,20 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           ),
         ),
       );
+      if (outcome == 'share' && mounted) {
+        await _shareCurrentPdf();
+      }
+      return outcome != null
+          ? WorkflowOutcome.completed
+          : WorkflowOutcome.cancelled;
     }
+    return WorkflowOutcome.completed;
   }
 
-  Future<void> _openPages() async {
+  Future<WorkflowOutcome> _openPages() async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null || doc == null) return;
+    if (engine == null || doc == null) return WorkflowOutcome.failed;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1647,6 +1688,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         onJumpToPage: _goto,
       ),
     );
+    return WorkflowOutcome.completed;
   }
 
   Future<void> _openQuickMark({String? markType, String? markLabel}) async {
@@ -1743,10 +1785,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _openSecure() async {
+  Future<WorkflowOutcome> _openSecure() async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null || doc == null) return;
+    if (engine == null || doc == null) return WorkflowOutcome.failed;
+    var statusChanged = false;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1754,15 +1797,20 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       builder: (context) => SecureSheet(
         engine: engine,
         handle: doc,
-        onStatusChanged: _onOperationStatus,
+        onStatusChanged: (status) {
+          statusChanged = true;
+          _onOperationStatus(status);
+        },
       ),
     );
+    return statusChanged ? WorkflowOutcome.completed : WorkflowOutcome.cancelled;
   }
 
-  Future<void> _openOrganize() async {
+  Future<WorkflowOutcome> _openOrganize() async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null) return;
+    if (engine == null) return WorkflowOutcome.failed;
+    var statusChanged = false;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1773,16 +1821,21 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         pageCount: _pageCount,
         hasDocument: doc != null,
         documentName: _name,
-        onOpenPages: _openPages,
-        onStatusChanged: _onOperationStatus,
+        onOpenPages: () async => await _openPages(),
+        onStatusChanged: (status) {
+          statusChanged = true;
+          _onOperationStatus(status);
+        },
       ),
     );
+    return statusChanged ? WorkflowOutcome.completed : WorkflowOutcome.cancelled;
   }
 
-  Future<void> _openExport() async {
+  Future<WorkflowOutcome> _openExport() async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null || doc == null) return;
+    if (engine == null || doc == null) return WorkflowOutcome.failed;
+    var statusChanged = false;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1792,9 +1845,13 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         handle: doc,
         page: _page,
         pageCount: _pageCount,
-        onStatusChanged: _onOperationStatus,
+        onStatusChanged: (status) {
+          statusChanged = true;
+          _onOperationStatus(status);
+        },
       ),
     );
+    return statusChanged ? WorkflowOutcome.completed : WorkflowOutcome.cancelled;
   }
 
   Future<void> _openTextEdit() async {
@@ -1820,10 +1877,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _openRecipes({String? initialAction}) async {
+  Future<WorkflowOutcome> _openRecipes({String? initialAction}) async {
     final engine = _engine;
     final doc = _doc;
-    if (engine == null || doc == null) return;
+    if (engine == null || doc == null) return WorkflowOutcome.failed;
     final action = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -1836,15 +1893,17 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         onStatusChanged: _onOperationStatus,
       ),
     );
-    if (!mounted) return;
+    if (!mounted || action == null) return WorkflowOutcome.cancelled;
     switch (action) {
       case 'pages':
-        await _openPages();
+        return await _openPages();
       case 'reviewPhones':
-        await _openSecure();
+        return await _openSecure();
       case 'compress':
       case 'compare':
-        await _openExport();
+        return await _openExport();
+      default:
+        return WorkflowOutcome.completed;
     }
   }
 
@@ -1853,39 +1912,85 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     List<({String id, String label, String detail, IconData icon})> actions,
   ) => showModalBottomSheet<String>(
     context: context,
+    isScrollControlled: true,
     useSafeArea: true,
-    builder: (context) => SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.82,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-          child: Column(
-            children: [
+    builder: (context) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            if (actions.length > 2)
               Padding(
-                padding: const EdgeInsets.all(8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleLarge,
+                padding: const EdgeInsets.only(bottom: 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final action in actions.take(3))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ActionChip(
+                            avatar: Icon(action.icon, size: 18),
+                            label: Text(action.label),
+                            onPressed: () => Navigator.pop(context, action.id),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
-              Expanded(
-                child: ListView(
-                  children: [
-                    for (final action in actions)
-                      ListTile(
-                        leading: Icon(action.icon),
-                        title: Text(action.label),
-                        subtitle: Text(action.detail),
-                        onTap: () => Navigator.pop(context, action.id),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                physics: const ClampingScrollPhysics(),
+                children: [
+                  for (final action in actions)
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      leading: CircleAvatar(
+                        radius: 20,
+                        backgroundColor: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
+                        child: Icon(
+                          action.icon,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                  ],
-                ),
+                      title: Text(
+                        action.label,
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      subtitle: Text(action.detail),
+                      onTap: () => Navigator.pop(context, action.id),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     ),
@@ -2049,35 +2154,42 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       await _openInsights(initialQuestion: query == 'summary' ? null : query);
       return;
     }
+    final WorkflowOutcome outcome;
     switch (request) {
       case 'phones':
       case 'dates':
-        await _openRecipes(initialAction: request);
+        outcome = await _openRecipes(initialAction: request);
       case 'compress':
       case 'compare':
       case 'export':
       case 'ocr':
-        await _openExport();
+        outcome = await _openExport();
       case 'combine':
-        await _openOrganize();
+        outcome = await _openOrganize();
       case 'pages':
-        await _openPages();
+        outcome = await _openPages();
       case 'forms':
-        await _openForms();
+        outcome = await _openForms();
       case 'highlight':
-        await _highlightPhrase();
+        outcome = await _highlightPhrase();
       case 'secure':
-        await _openSecure();
+        outcome = await _openSecure();
       case 'sign':
-        await _openSignature();
+        outcome = await _openSignature();
       default:
         await _explainUnsupportedRequest(request);
         return;
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Done — ${_agentTaskLabel(request)}.')),
-    );
+    if (outcome == WorkflowOutcome.completed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Done — ${_agentTaskLabel(request)}.')),
+      );
+    } else if (outcome == WorkflowOutcome.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not complete ${_agentTaskLabel(request)}.')),
+      );
+    }
   }
 
   String _agentTaskLabel(String request) => switch (request) {
@@ -2400,38 +2512,45 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                             onPointerDown: _onViewerPointerDown,
                             onPointerUp: _onViewerPointerUp,
                             onPointerCancel: _onViewerPointerCancel,
-                            child: Center(
-                              child: InteractiveViewer(
-                                transformationController: _viewerTransform,
-                                constrained: false,
-                                alignment: Alignment.center,
-                                minScale: 1,
-                                maxScale: 8,
+                            child: InteractiveViewer(
+                              transformationController: _viewerTransform,
+                              minScale: 1,
+                              maxScale: 8,
+                              clipBehavior: Clip.none,
+                              child: Center(
                                 child: SizedBox(
-                                  width: constraints.maxWidth,
-                                  height: constraints.maxHeight,
-                                  child: Center(
-                                    child: SizedBox(
-                                      width: pageWidth,
-                                      height: pageHeight,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onDoubleTapDown: (details) {
-                                          final currentScale =
-                                              _viewerTransform.value
-                                                  .getMaxScaleOnAxis();
-                                          if (currentScale > 1.05) {
-                                            _viewerTransform.value =
-                                                Matrix4.identity();
-                                          } else {
-                                            final focal = details.localPosition;
-                                            final matrix = Matrix4.identity()
-                                              ..translate(-focal.dx, -focal.dy)
-                                              ..scale(2.0, 2.0);
-                                            _viewerTransform.value = matrix;
-                                          }
-                                        },
-                                        onDoubleTap: () {},
+                                  width: pageWidth,
+                                  height: pageHeight,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onDoubleTapDown: (details) {
+                                      final currentScale =
+                                          _viewerTransform.value
+                                              .getMaxScaleOnAxis();
+                                      if (currentScale > 1.05) {
+                                        _viewerTransform.value =
+                                            Matrix4.identity();
+                                      } else {
+                                        const targetScale = 2.0;
+                                        final focal = details.localPosition;
+                                        final pageOriginX =
+                                            (constraints.maxWidth - pageWidth) / 2;
+                                        final pageOriginY =
+                                            (constraints.maxHeight - pageHeight) / 2;
+                                        final screenFocalX =
+                                            pageOriginX + focal.dx;
+                                        final screenFocalY =
+                                            pageOriginY + focal.dy;
+                                        final dx = constraints.maxWidth / 2 -
+                                            screenFocalX * targetScale;
+                                        final dy = constraints.maxHeight / 2 -
+                                            screenFocalY * targetScale;
+                                        _viewerTransform.value = Matrix4.identity()
+                                          ..translate(dx, dy)
+                                          ..scale(targetScale);
+                                      }
+                                    },
+                                    onDoubleTap: () {},
                                         onLongPressStart: (details) =>
                                             _beginTextSelection(
                                               details.localPosition,
@@ -2687,14 +2806,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                                 ),
                                               ),
                                           ],
-                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
 
                           // Floating Overlay: Accessible single-pointer zoom HUD
                           Positioned(

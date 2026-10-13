@@ -27,13 +27,13 @@ class ZoomControlsHud extends StatelessWidget {
     if (viewportSize != null &&
         viewportSize!.width > 0 &&
         viewportSize!.height > 0) {
-      final focalPoint = Offset(
+      final center = Offset(
         viewportSize!.width / 2,
         viewportSize!.height / 2,
       );
-      final translation = current.getTranslation();
-      final dx = focalPoint.dx - (focalPoint.dx - translation.x) * scaleRatio;
-      final dy = focalPoint.dy - (focalPoint.dy - translation.y) * scaleRatio;
+      final sceneCenter = transformController.toScene(center);
+      final dx = center.dx - sceneCenter.dx * targetScale;
+      final dy = center.dy - sceneCenter.dy * targetScale;
       final matrix = Matrix4.identity()
         ..translate(dx, dy)
         ..scale(targetScale, targetScale);
