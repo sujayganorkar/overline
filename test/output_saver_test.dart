@@ -27,4 +27,19 @@ void main() {
     expect(outputPathsIn('{"path": "/etc/passwd"}'), isEmpty);
     expect(outputPathsIn('{"path": "../outside.pdf"}'), isEmpty);
   });
+
+  test('unwritten doc_reduce results are ignored while written ones are offered', () {
+    expect(
+      outputPathsIn(
+        '{"path": "outputs/reduced.pdf", "written": false, "bytes_before": 500, "bytes_after": 520}',
+      ),
+      isEmpty,
+    );
+    expect(
+      outputPathsIn(
+        '{"path": "outputs/reduced.pdf", "written": true, "bytes_before": 900, "bytes_after": 500}',
+      ),
+      ['outputs/reduced.pdf'],
+    );
+  });
 }

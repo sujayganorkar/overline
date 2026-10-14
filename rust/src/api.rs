@@ -591,27 +591,7 @@ fn execute_tool(
         .automation
         .call(tool, &arguments)
         .map_err(|error| error.to_string())?;
-    let contents = contents
-        .into_iter()
-        .map(|content| match content {
-            Content::Json(value) => OperationContent {
-                json: value.to_string(),
-                png: Vec::new(),
-                width: 0,
-                height: 0,
-            },
-            Content::Png {
-                data,
-                width,
-                height,
-            } => OperationContent {
-                json: String::new(),
-                png: data,
-                width,
-                height,
-            },
-        })
-        .collect();
+    let contents = operation_contents(contents, &state.root);
     let status = if requires_document {
         document_status(state, handle)?
     } else {
@@ -624,6 +604,59 @@ fn execute_tool(
         }
     };
     Ok(OperationResponse { contents, status })
+}
+
+fn operation_contents(contents: Vec<Content>, root: &Path) -> Vec<OperationContent> {
+    contents
+        .into_iter()
+        .map(|content| match content {
+            Content::Json(mut value) => {
+                relativize_workspace_paths(&mut value, root);
+                OperationContent {
+                    json: value.to_string(),
+                    png: Vec::new(),
+                    width: 0,
+                    height: 0,
+                }
+            }
+            Content::Png {
+                data,
+                width,
+                height,
+            } => OperationContent {
+                json: String::new(),
+                png: data,
+                width,
+                height,
+            },
+        })
+        .collect()
+}
+
+/// Strip the confined workspace root from any path strings inside tool JSON so
+/// callers receive workspace-relative paths (`outputs/...`, `imports/...`) and
+/// host/device filesystem roots never cross the bridge.
+fn relativize_workspace_paths(value: &mut Value, root: &Path) {
+    match value {
+        Value::String(text) => {
+            if let Ok(relative) = Path::new(text.as_str()).strip_prefix(root)
+                && !relative.as_os_str().is_empty()
+            {
+                *text = relative.to_string_lossy().replace('\\', "/");
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                relativize_workspace_paths(item, root);
+            }
+        }
+        Value::Object(map) => {
+            for entry in map.values_mut() {
+                relativize_workspace_paths(entry, root);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
 }
 
 /// Create a blank PDF without opening a second viewer document: the upstream
@@ -747,27 +780,7 @@ fn compare_with_file(
         &json!({"doc": other_id, "discard_changes": true}),
     );
     let contents = result.map_err(|error| error.to_string())?;
-    let contents = contents
-        .into_iter()
-        .map(|content| match content {
-            Content::Json(value) => OperationContent {
-                json: value.to_string(),
-                png: Vec::new(),
-                width: 0,
-                height: 0,
-            },
-            Content::Png {
-                data,
-                width,
-                height,
-            } => OperationContent {
-                json: String::new(),
-                png: data,
-                width,
-                height,
-            },
-        })
-        .collect();
+    let contents = operation_contents(contents, &state.root);
     let status = document_status(state, handle)?;
     Ok(OperationResponse { contents, status })
 }

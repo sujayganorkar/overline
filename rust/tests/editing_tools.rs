@@ -209,13 +209,19 @@ async fn editing_tools_end_to_end() {
         .await
         .expect("exported text missing");
     assert!(!text.is_empty());
-    run(
+    let opt = run(
         &engine,
         doc,
         "doc_optimize",
         r#"{"path":"outputs/small.pdf"}"#,
     )
     .await;
+    assert_eq!(opt[0]["path"], "outputs/small.pdf");
+    let small = engine
+        .read_output(opt[0]["path"].as_str().expect("opt path").to_owned())
+        .await
+        .expect("optimized PDF missing");
+    assert!(small.starts_with(b"%PDF"));
     run(&engine, doc, "ocr_status", "{}").await;
     run(
         &engine,
@@ -224,15 +230,16 @@ async fn editing_tools_end_to_end() {
         r#"{"other":"outputs/one.pdf"}"#,
     )
     .await;
-    run(
+    let rep = run(
         &engine,
         doc,
         "doc_compare_report",
         r#"{"other":"outputs/one.pdf","path":"outputs/report.pdf"}"#,
     )
     .await;
+    assert_eq!(rep[0]["path"], "outputs/report.pdf");
     let report = engine
-        .read_output("outputs/report.pdf".to_owned())
+        .read_output(rep[0]["path"].as_str().expect("report path").to_owned())
         .await
         .expect("compare report missing");
     assert!(report.starts_with(b"%PDF"));
@@ -260,6 +267,15 @@ async fn editing_tools_end_to_end() {
         &format!(r#"{{"page":1,"path":"{picture}","rect":[72,600,272,750]}}"#),
     )
     .await;
+    let target_opt = run(
+        &engine,
+        doc,
+        "doc_optimize",
+        r#"{"path":"outputs/compressed.pdf","color":{"downsample":true,"ppi":50,"above_ppi":50,"compression":"jpeg","quality":26}}"#,
+    )
+    .await;
+    assert_eq!(target_opt[0]["path"], "outputs/compressed.pdf");
+    assert!(target_opt[0]["bytes_after"].as_u64().unwrap_or(0) > 0);
     run(
         &engine,
         doc,

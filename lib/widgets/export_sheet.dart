@@ -521,12 +521,16 @@ class _ExportSheetState extends State<ExportSheet> {
         title: const Text('Compression preset'),
         children: [
           SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, 'balanced'),
-            child: const Text('Balanced (150 ppi JPEG)'),
+            onPressed: () => Navigator.pop(context, 'reduce'),
+            child: const Text('Reduce file size (150 ppi, high quality)'),
           ),
           SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, 'reduce'),
-            child: const Text('Reduce file size (Acrobat preset)'),
+            onPressed: () => Navigator.pop(context, 'balanced'),
+            child: const Text('Balanced (120 ppi JPEG)'),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'small'),
+            child: const Text('Smallest file (96 ppi JPEG)'),
           ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(context, 'target'),
@@ -540,22 +544,58 @@ class _ExportSheetState extends State<ExportSheet> {
       await _compressToTarget();
       return;
     }
+    final bridge.OperationResponse? response;
     if (preset == 'reduce') {
-      final response = await _run('doc_reduce', {
+      response = await _run('doc_reduce', {
         'path': 'outputs/reduced.pdf',
       }, refreshStatus: false);
-      if (response == null || !mounted) return;
-      await saveToolOutputs(context, widget.engine, [
-        for (final c in response.contents) c.json,
-      ]);
     } else {
-      final response = await _run('doc_optimize', {
+      final (ppi, quality) = preset == 'small' ? (96, 35) : (120, 50);
+      response = await _run('doc_optimize', {
         'path': 'outputs/optimized.pdf',
+        'color': {
+          'downsample': true,
+          'ppi': ppi,
+          'above_ppi': ppi,
+          'compression': 'jpeg',
+          'quality': quality,
+        },
+        'gray': {
+          'downsample': true,
+          'ppi': ppi,
+          'above_ppi': ppi,
+          'compression': 'jpeg',
+          'quality': quality,
+        },
+        'discard_thumbnails': true,
+        'discard_alternate_images': true,
+        'flate_unencoded': true,
       }, refreshStatus: false);
-      if (response == null || !mounted) return;
-      await saveToolOutputs(context, widget.engine, [
-        for (final c in response.contents) c.json,
-      ]);
+    }
+    if (response == null || !mounted) return;
+    final raw = response.contents
+        .where((c) => c.json.isNotEmpty)
+        .map((c) => c.json)
+        .firstOrNull;
+    final data = raw == null ? null : jsonDecode(raw);
+    final written = data is Map<String, dynamic> ? data['written'] : null;
+    final before = data is Map<String, dynamic> ? data['bytes_before'] : null;
+    final after = data is Map<String, dynamic> ? data['bytes_after'] : null;
+    if (written == false ||
+        (before is int && after is int && after >= before)) {
+      await _showReport(
+        'Could not make a smaller copy',
+        before is int
+            ? 'This PDF is already compact (${_formatFileSize(before)}). Your original is unchanged.'
+            : 'The selected preset did not reduce this PDF. Your original is unchanged.',
+      );
+      return;
+    }
+    await saveToolOutputs(context, widget.engine, [
+      for (final c in response.contents) c.json,
+    ]);
+    if (mounted && widget.initialAction != null) {
+      Navigator.pop(context);
     }
   }
 
@@ -856,7 +896,7 @@ class _ExportSheetState extends State<ExportSheet> {
         (quality: 26, ppi: 72),
         (quality: 18, ppi: 50),
       ];
-      final runId = DateTime.now().microsecondsSinceEpoch;
+      const candidatePath = 'outputs/compressed.pdf';
       for (var index = 0; index < profiles.length; index++) {
         final profile = profiles[index];
         if (!mounted) return;
@@ -865,18 +905,18 @@ class _ExportSheetState extends State<ExportSheet> {
               'Trying quality ${profile.quality}, ${profile.ppi} ppi (${index + 1}/${profiles.length})…';
         });
         final response = await _run('doc_optimize', {
-          'path': 'outputs/target-$runId-${index + 1}.pdf',
+          'path': candidatePath,
           'color': {
             'downsample': true,
             'ppi': profile.ppi,
-            'above_ppi': math.max(225, profile.ppi),
+            'above_ppi': profile.ppi,
             'compression': 'jpeg',
             'quality': profile.quality,
           },
           'gray': {
             'downsample': true,
             'ppi': profile.ppi,
-            'above_ppi': math.max(225, profile.ppi),
+            'above_ppi': profile.ppi,
             'compression': 'jpeg',
             'quality': profile.quality,
           },
@@ -889,8 +929,8 @@ class _ExportSheetState extends State<ExportSheet> {
           for (final content in response.contents)
             ...outputPathsIn(content.json),
         ];
-        if (paths.isEmpty) throw StateError('Optimizer did not return a file');
-        final candidate = await widget.engine.readOutput(path: paths.first);
+        final outputPath = paths.isNotEmpty ? paths.first : candidatePath;
+        final candidate = await widget.engine.readOutput(path: outputPath);
         if (candidate.length < best.length) best = candidate;
         if (candidate.length <= targetBytes) {
           best = candidate;
@@ -929,6 +969,9 @@ class _ExportSheetState extends State<ExportSheet> {
               fileNameOverrides: ['compressed.pdf'],
             ),
           );
+          if (mounted && widget.initialAction != null) {
+            Navigator.pop(context);
+          }
         } catch (e) {
           if (mounted) {
             AppNotice.show(
@@ -956,6 +999,9 @@ class _ExportSheetState extends State<ExportSheet> {
             kind: NoticeKind.success,
           ),
         );
+        if (mounted && widget.initialAction != null) {
+          Navigator.pop(context);
+        }
       }
     } catch (error) {
       if (mounted) {

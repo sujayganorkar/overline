@@ -10,9 +10,12 @@ import 'widgets/app_notice.dart';
 
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:printing/printing.dart';
 
 import 'bridge/api.dart' as bridge;
 import 'services/pdf_engine.dart';
+import 'services/theme_preference.dart';
+import 'services/view_preference.dart';
 import 'services/signature_store.dart';
 import 'services/recent_documents_store.dart';
 import 'widgets/annotate_page.dart';
@@ -43,59 +46,146 @@ void main() {
   runApp(const PdfCraftApp());
 }
 
-class PdfCraftApp extends StatelessWidget {
-  const PdfCraftApp({super.key, this.engineFactory = createPdfCraftEngine});
+class PdfCraftApp extends StatefulWidget {
+  const PdfCraftApp({
+    super.key,
+    this.engineFactory = createPdfCraftEngine,
+    this.initialDocumentBytes,
+    this.initialDocumentName,
+  });
 
   final PdfEngineFactory engineFactory;
+  final Uint8List? initialDocumentBytes;
+  final String? initialDocumentName;
+
+  @override
+  State<PdfCraftApp> createState() => _PdfCraftAppState();
+}
+
+class _PdfCraftAppState extends State<PdfCraftApp> {
+  ThemePreferenceController? _theme;
+  ReadingPreferenceController? _reading;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPreferences());
+  }
+
+  Future<void> _loadPreferences() async {
+    final theme = await ThemePreferenceController.load();
+    final reading = await ReadingPreferenceController.load();
+    if (!mounted) return;
+    setState(() {
+      _theme = theme;
+      _reading = reading;
+    });
+  }
+
+  static ThemeData _themeData(Brightness brightness) {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFFB42332),
+      brightness: brightness,
+    );
+    return ThemeData(
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: brightness == Brightness.dark
+          ? colorScheme.surface
+          : const Color(0xFFFAFBFC),
+      appBarTheme: const AppBarTheme(
+        centerTitle: false,
+        scrolledUnderElevation: 0,
+      ),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+      ),
+      useMaterial3: true,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'PdfCraft Mobile',
-      navigatorObservers: [NoticeNavigatorObserver()],
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFB42332),
-          primary: const Color(0xFFB42332),
-          surface: const Color(0xFFFAFBFC),
+    final controller = _theme;
+    return ReadingModeScope(
+      controller: _reading,
+      child: PdfCraftThemeScope(
+        controller: controller,
+        child: MaterialApp(
+        title: 'PdfCraft Mobile',
+        navigatorObservers: [NoticeNavigatorObserver()],
+        debugShowCheckedModeBanner: false,
+        theme: _themeData(Brightness.light),
+        darkTheme: _themeData(Brightness.dark),
+        themeMode: controller?.mode ?? ThemeMode.system,
+        home: ViewerPage(
+          engineFactory: widget.engineFactory,
+          initialDocumentBytes: widget.initialDocumentBytes,
+          initialDocumentName: widget.initialDocumentName,
         ),
-        scaffoldBackgroundColor: const Color(0xFFFAFBFC),
-        appBarTheme: const AppBarTheme(
-          centerTitle: false,
-          scrolledUnderElevation: 0,
-        ),
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-        ),
-        iconButtonTheme: IconButtonThemeData(
-          style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
-        ),
-        useMaterial3: true,
       ),
-      home: ViewerPage(engineFactory: engineFactory),
+      ),
     );
+  }
+}
+
+class PdfCraftThemeScope extends InheritedNotifier<ThemePreferenceController> {
+  const PdfCraftThemeScope({
+    super.key,
+    required ThemePreferenceController? controller,
+    required super.child,
+  }) : super(notifier: controller);
+
+  static PdfCraftThemeScope? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<PdfCraftThemeScope>();
+  }
+}
+
+class ReadingModeScope extends InheritedNotifier<ReadingPreferenceController> {
+  const ReadingModeScope({
+    super.key,
+    required ReadingPreferenceController? controller,
+    required super.child,
+  }) : super(notifier: controller);
+
+  static ReadingModeScope? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<ReadingModeScope>();
   }
 }
 
 enum WorkflowOutcome { completed, cancelled, failed, needsInput }
 
 class ViewerPage extends StatefulWidget {
-  const ViewerPage({super.key, required this.engineFactory});
+  const ViewerPage({
+    super.key,
+    required this.engineFactory,
+    this.initialDocumentBytes,
+    this.initialDocumentName,
+  });
 
   final PdfEngineFactory engineFactory;
+  final Uint8List? initialDocumentBytes;
+  final String? initialDocumentName;
 
   @override
   State<ViewerPage> createState() => _ViewerPageState();
+}
+
+enum DocumentInteractionMode {
+  read,
+  markup,
+  sign,
 }
 
 class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
@@ -132,10 +222,37 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   final TransformationController _viewerTransform = TransformationController();
   final GlobalKey _viewerPageKey = GlobalKey();
   int _viewerPointerCount = 0;
+  ReadingMode _readingMode = ReadingMode.single;
+  bool _invertDocumentColors = false;
+  final Map<int, Future<Uint8List>> _horizontalPageImages = <int, Future<Uint8List>>{};
+  ReadingPreferenceController? _readingPreference;
+  Uint8List? _secondPng;
+  double? _secondImageWidthPx;
+  double? _secondImageHeightPx;
+  final Map<int, Future<Uint8List>> _verticalPageImages = <int, Future<Uint8List>>{};
   Offset? _viewerSwipeStart;
   bool _viewerLongPressSelecting = false;
   Timer? _recoveryDebounce;
   Future<void> _recoveryWrites = Future<void>.value();
+
+  // Unified Canvas & UX state
+  DocumentInteractionMode _canvasMode = DocumentInteractionMode.read;
+  bool _showChrome = true;
+
+  // In-canvas markup state
+  final List<annotation_geo.InkStroke> _canvasStrokes = [];
+  List<Offset> _activeStroke = [];
+  String _markupTool = 'pen'; // 'pen', 'highlighter', 'eraser'
+  String _markupColor = 'yellow';
+  double _markupWidth = 4.0;
+
+  // In-canvas signature state
+  Offset? _draftSignaturePositionPx;
+  double _draftSignatureWidthPx = 160.0;
+  double _draftSignatureHeightPx = 60.0;
+  String? _activeSignatureTyped;
+  Uint8List? _activeSignatureImage;
+  bool _activeSignatureIsDate = false;
 
   @override
   void initState() {
@@ -144,6 +261,42 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     _initEngine();
     _loadRecents();
   }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = ReadingModeScope.maybeOf(context)?.notifier;
+    if (controller != _readingPreference) {
+      _readingPreference = controller;
+    }
+    final mode = controller?.mode;
+    if (mode != null && mode != _readingMode) {
+      _readingMode = mode;
+    }
+    final invert = controller?.invertDocumentColors ?? false;
+    if (invert != _invertDocumentColors) {
+      _invertDocumentColors = invert;
+    }
+  }
+
+  Future<void> _setReadingMode(ReadingMode mode) async {
+    if (_readingMode == mode) return;
+    setState(() {
+      _readingMode = mode;
+      _secondPng = null;
+      _secondImageWidthPx = null;
+      _secondImageHeightPx = null;
+    });
+    await _readingPreference?.setMode(mode);
+    if (!mounted) return;
+    await _render();
+  }
+
+  Future<void> _setInvertedColors(bool value) async {
+    setState(() => _invertDocumentColors = value);
+    await _readingPreference?.setInverted(value);
+  }
+
 
   void _reportError(String message, Object error) {
     if (!mounted) return;
@@ -169,6 +322,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       });
       unawaited(_offerRecovery(engine));
       _setupNativeChannels();
+      if (widget.initialDocumentBytes != null) {
+        await _openDocumentBytes(
+          widget.initialDocumentName ?? 'Document.pdf',
+          widget.initialDocumentBytes!,
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       _reportError('Engine init failed.', e);
@@ -249,7 +408,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         _recoveryAvailable = false;
         _status = 'Opened $name';
       });
-      await _clearRecoveryCheckpoint();
+      unawaited(_clearRecoveryCheckpoint());
       if (previousDoc != null) {
         try {
           await engine.close(handle: previousDoc);
@@ -257,6 +416,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           debugPrint('Could not close previous PDF document: $error');
         }
       }
+      _verticalPageImages.clear();
+      _horizontalPageImages.clear();
       await _render();
       unawaited(
         _recentStore
@@ -418,6 +579,25 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     final engine = _engine;
     if (doc == null || engine == null) return;
     final page = _page;
+
+    if (_readingMode == ReadingMode.vertical ||
+        _readingMode == ReadingMode.horizontalContinuous) {
+      setState(() {
+        _busy = true;
+        _status = 'Rendering pages…';
+      });
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _png = null;
+        _secondPng = null;
+        _secondImageWidthPx = null;
+        _secondImageHeightPx = null;
+        _status = 'Ready';
+      });
+      return;
+    }
+
     setState(() {
       _busy = true;
       _status = 'Rendering page $page\u2026';
@@ -429,11 +609,31 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         dpi: 96,
       );
       final pageSize = await engine.pageSize(handle: doc, page1Based: page);
+      Uint8List? secondPng;
+      bridge.PageSize? secondPageSize;
+      if (_readingMode == ReadingMode.doublePage && page < _pageCount) {
+        secondPng = await engine.renderPagePng(
+          handle: doc,
+          page1Based: page + 1,
+          dpi: 96,
+        );
+        secondPageSize = await engine.pageSize(
+          handle: doc,
+          page1Based: page + 1,
+        );
+      }
       if (!mounted || _doc != doc || _page != page) return;
       setState(() {
         _png = png;
         _imageWidthPx = pageSize.width * 96 / 72;
         _imageHeightPx = pageSize.height * 96 / 72;
+        _secondPng = secondPng;
+        _secondImageWidthPx = secondPageSize == null
+            ? null
+            : secondPageSize.width * 96 / 72;
+        _secondImageHeightPx = secondPageSize == null
+            ? null
+            : secondPageSize.height * 96 / 72;
         _markers = const [];
         _pageTextLines = const [];
         _pageTextLoading = true;
@@ -532,6 +732,141 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
+  Widget _verticalPageList() {
+    final doc = _doc;
+    final engine = _engine;
+    if (doc == null || engine == null) {
+      return Center(child: Text(_status));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: _pageCount,
+      itemBuilder: (context, index) {
+        final page = index + 1;
+        final future = _verticalPageImages.putIfAbsent(
+          page,
+          () => engine.renderPagePng(handle: doc, page1Based: page, dpi: 96),
+        );
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    'Page $page of $_pageCount',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+                FutureBuilder<Uint8List>(
+                  future: future,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return SizedBox(
+                        height: 120,
+                        child: Center(
+                          child: Text('Could not render page $page.'),
+                        ),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const SizedBox(
+                        height: 200,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    return _documentImage(
+                      snapshot.data!,
+                      fit: BoxFit.contain,
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _horizontalPageList() {
+    final doc = _doc;
+    final engine = _engine;
+    if (doc == null || engine == null) {
+      return Center(child: Text(_status));
+    }
+    return PageView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: _pageCount,
+      onPageChanged: (index) => setState(() => _page = index + 1),
+      itemBuilder: (context, index) {
+        final page = index + 1;
+        final future = _horizontalPageImages.putIfAbsent(
+          page,
+          () => engine.renderPagePng(handle: doc, page1Based: page, dpi: 96),
+        );
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Page $page of $_pageCount',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: FutureBuilder<Uint8List>(
+                  future: future,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Text('Could not render page $page.'),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    return _documentImage(snapshot.data!);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _documentImage(
+    Uint8List bytes, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.fill,
+  }) {
+    Widget image = _invertDocumentColors
+        ? Image.memory(bytes, fit: fit, gaplessPlayback: true, color: Colors.white)
+        : Image.memory(bytes, fit: fit, gaplessPlayback: true);
+    if (_invertDocumentColors) {
+      image = ColorFiltered(
+        colorFilter: const ColorFilter.matrix([
+          -1, 0, 0, 0, 255,
+          0, -1, 0, 0, 255,
+          0, 0, -1, 0, 255,
+          0, 0, 0, 1, 0,
+        ]),
+        child: image,
+      );
+    }
+    if (width != null || height != null) {
+      image = SizedBox(width: width, height: height, child: image);
+    }
+    return image;
+  }
+
   Future<void> _goto(int page) async {
     if (_busy) return;
     if (page < 1 || page > _pageCount || page == _page) return;
@@ -613,6 +948,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       return;
     }
     final delta = event.position - start;
+    if (_readingMode == ReadingMode.doublePage && _swipeStartedAtFit) {
+      final step = delta.dx < 0 ? 2 : -2;
+      final destination = (_page + step).clamp(1, _pageCount);
+      if (destination != _page) unawaited(_goto(destination));
+      return;
+    }
     final destination = pageForSwipe(
       delta,
       currentPage: _page,
@@ -933,6 +1274,44 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           await engine.cancelSave(handle: doc, token: snapshot.token);
         } catch (error) {
           debugPrint('Could not release shared PDF snapshot: $error');
+        }
+      }
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _print() async {
+    final doc = _doc;
+    final engine = _engine;
+    final currentName = _name;
+    if (doc == null || engine == null || currentName == null || _busy) return;
+    bridge.SaveSnapshot? snapshot;
+    setState(() {
+      _busy = true;
+      _status = 'Preparing PDF to print\u2026';
+    });
+    try {
+      _recoveryDebounce?.cancel();
+      await _recoveryWrites;
+      snapshot = await engine.saveSnapshot(handle: doc);
+      final baseName = currentName.replaceAll(RegExp(r'[/\\]'), '_');
+      final fileName = baseName.toLowerCase().endsWith('.pdf')
+          ? baseName
+          : '$baseName.pdf';
+      await Printing.layoutPdf(
+        onLayout: (format) async => snapshot!.bytes,
+        name: fileName,
+      );
+      if (!mounted) return;
+      setState(() => _status = 'Print sheet opened');
+    } catch (error) {
+      if (mounted) _reportError('Print failed.', error);
+    } finally {
+      if (snapshot != null) {
+        try {
+          await engine.cancelSave(handle: doc, token: snapshot.token);
+        } catch (error) {
+          debugPrint('Could not release printed PDF snapshot: $error');
         }
       }
       if (mounted) setState(() => _busy = false);
@@ -1749,6 +2128,585 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     return WorkflowOutcome.completed;
   }
 
+  // --- In-Canvas Unified Modes ---
+
+  void _enterMarkupMode() {
+    setState(() {
+      _canvasMode = DocumentInteractionMode.markup;
+      _canvasStrokes.clear();
+      _activeStroke.clear();
+      _textSelectionAnchor = null;
+      _textSelectionExtent = null;
+    });
+  }
+
+  void _undoLastCanvasStroke() {
+    if (_canvasStrokes.isNotEmpty) {
+      setState(() => _canvasStrokes.removeLast());
+    }
+  }
+
+  void _cancelMarkup() {
+    setState(() {
+      _canvasStrokes.clear();
+      _activeStroke.clear();
+      _canvasMode = DocumentInteractionMode.read;
+    });
+  }
+
+  Future<void> _applyCanvasStrokes() async {
+    final engine = _engine;
+    final doc = _doc;
+    if (engine == null || doc == null || _canvasStrokes.isEmpty) {
+      setState(() => _canvasMode = DocumentInteractionMode.read);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final response = await engine.executeTool(
+        handle: doc,
+        tool: 'comment_add',
+        argumentsJson: jsonEncode(
+          annotation_geo.inkArgs(
+            page: _page,
+            strokes: _canvasStrokes,
+            dpi: 96,
+            color: _markupColor,
+            width: _markupWidth,
+          ),
+        ),
+      );
+      _onOperationStatus(response.status);
+      final png = await engine.renderPagePng(handle: doc, page1Based: _page, dpi: 96);
+      if (!mounted) return;
+      setState(() {
+        _png = png;
+        _canvasStrokes.clear();
+        _activeStroke.clear();
+        _canvasMode = DocumentInteractionMode.read;
+      });
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Markup saved on page $_page.',
+          kind: NoticeKind.success,
+          action: NoticeAction(label: 'Undo', onPressed: _undo),
+        ),
+      );
+    } catch (e) {
+      if (mounted) _reportError('Could not save markup.', e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _enterSignMode() async {
+    final doc = _doc;
+    final engine = _engine;
+    if (doc == null || engine == null) return;
+    setState(() {
+      _canvasMode = DocumentInteractionMode.sign;
+      _activeSignatureIsDate = false;
+      final w = _imageWidthPx ?? 600;
+      final h = _imageHeightPx ?? 800;
+      _draftSignaturePositionPx = Offset(w * 0.25, h * 0.7);
+    });
+    try {
+      final store = SignatureStore();
+      final savedTyped = await store.loadTypedName();
+      final savedDrawn = await store.loadDrawn();
+      if (!mounted || _canvasMode != DocumentInteractionMode.sign) return;
+      setState(() {
+        _activeSignatureTyped = savedTyped;
+        _activeSignatureImage = savedDrawn;
+      });
+    } catch (_) {}
+  }
+
+  void _cancelSign() {
+    setState(() {
+      _draftSignaturePositionPx = null;
+      _canvasMode = DocumentInteractionMode.read;
+    });
+  }
+
+  Future<void> _applySignaturePlacement() async {
+    final engine = _engine;
+    final doc = _doc;
+    final draft = _draftSignaturePositionPx;
+    if (engine == null || doc == null || draft == null) return;
+    setState(() => _busy = true);
+    try {
+      final at = [
+        annotation_geo.pxToPt(draft.dx, 96),
+        annotation_geo.pxToPt(draft.dy, 96),
+      ];
+
+      bridge.OperationResponse response;
+      if (_activeSignatureIsDate) {
+        response = await engine.executeTool(
+          handle: doc,
+          tool: 'fill_sign_add',
+          argumentsJson: jsonEncode({
+            'page': _page,
+            'type': 'date',
+            'at': at,
+          }),
+        );
+      } else if (_activeSignatureImage != null) {
+        final staged = await engine.stageFile(
+          name: 'signature.png',
+          bytes: _activeSignatureImage!,
+        );
+        response = await engine.executeTool(
+          handle: doc,
+          tool: 'fill_sign_add',
+          argumentsJson: jsonEncode({
+            'page': _page,
+            'type': 'signature',
+            'at': at,
+            'source': staged,
+          }),
+        );
+      } else if (_activeSignatureTyped != null && _activeSignatureTyped!.isNotEmpty) {
+        response = await engine.executeTool(
+          handle: doc,
+          tool: 'fill_sign_add',
+          argumentsJson: jsonEncode({
+            'page': _page,
+            'type': 'signature',
+            'at': at,
+            'name': _activeSignatureTyped,
+          }),
+        );
+      } else {
+        setState(() => _busy = false);
+        await _promptCreateSignature();
+        return;
+      }
+
+      _onOperationStatus(response.status);
+      final png = await engine.renderPagePng(handle: doc, page1Based: _page, dpi: 96);
+      if (!mounted) return;
+      setState(() {
+        _png = png;
+        _draftSignaturePositionPx = null;
+        _canvasMode = DocumentInteractionMode.read;
+      });
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Signature placed on page $_page.',
+          kind: NoticeKind.success,
+          action: NoticeAction(label: 'Undo', onPressed: _undo),
+        ),
+      );
+    } catch (e) {
+      if (mounted) _reportError('Could not place signature.', e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _promptCreateSignature() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Create signature', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.gesture),
+                title: const Text('Draw signature'),
+                onTap: () => Navigator.pop(context, 'draw'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.text_fields),
+                title: const Text('Type your name'),
+                onTap: () => Navigator.pop(context, 'type'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == 'draw') {
+      if (!mounted) return;
+      final png = await showModalBottomSheet<Uint8List>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (context) => const SignaturePad(),
+      );
+      if (png != null && png.isNotEmpty) {
+        await SignatureStore().saveDrawn(png);
+        if (!mounted) return;
+        setState(() {
+          _activeSignatureImage = png;
+          _activeSignatureTyped = null;
+          _activeSignatureIsDate = false;
+        });
+      }
+    } else if (choice == 'type') {
+      if (!mounted) return;
+      final name = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (context) => const SignatureSheet(),
+      );
+      if (name != null && name.trim().isNotEmpty) {
+        await SignatureStore().saveTypedName(name.trim());
+        if (!mounted) return;
+        setState(() {
+          _activeSignatureTyped = name.trim();
+          _activeSignatureImage = null;
+          _activeSignatureIsDate = false;
+        });
+      }
+    }
+  }
+
+  void _onSelectBottomMode(int index) {
+    switch (index) {
+      case 0:
+        setState(() {
+          _canvasMode = DocumentInteractionMode.read;
+          _showChrome = true;
+        });
+      case 1:
+        _enterMarkupMode();
+      case 2:
+        _enterSignMode();
+      case 3:
+        _openPages();
+      case 4:
+        _showTools();
+    }
+  }
+
+  int _canvasModeToIndex([DocumentInteractionMode? mode]) {
+    switch (mode ?? _canvasMode) {
+      case DocumentInteractionMode.read:
+        return 0;
+      case DocumentInteractionMode.markup:
+        return 1;
+      case DocumentInteractionMode.sign:
+        return 2;
+    }
+  }
+
+  Widget _buildFloatingPageStepper(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 4,
+      shadowColor: Colors.black38,
+      shape: const StadiumBorder(),
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.94),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Previous page',
+              iconSize: 20,
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(),
+              onPressed: _busy || _page <= 1 ? null : () => _goto(_page - 1),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            const SizedBox(width: 4),
+            TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: _busy ? null : _goToPagePrompt,
+              child: Text(
+                'Page $_page of $_pageCount',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Next page',
+              iconSize: 20,
+              padding: const EdgeInsets.all(6),
+              constraints: const BoxConstraints(),
+              onPressed: _busy || _page >= _pageCount ? null : () => _goto(_page + 1),
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReadNavigationBar(BuildContext context) {
+    return NavigationBar(
+      selectedIndex: _canvasModeToIndex(),
+      onDestinationSelected: _onSelectBottomMode,
+      destinations: const [
+        NavigationDestination(
+          icon: Icon(Icons.menu_book_outlined),
+          selectedIcon: Icon(Icons.menu_book),
+          label: 'Read',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.draw_outlined),
+          selectedIcon: Icon(Icons.draw),
+          label: 'Markup',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.history_edu_outlined),
+          selectedIcon: Icon(Icons.history_edu),
+          label: 'Sign',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.grid_view_outlined),
+          selectedIcon: Icon(Icons.grid_view),
+          label: 'Pages',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.tune_outlined),
+          selectedIcon: Icon(Icons.tune),
+          label: 'Tools',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMarkupBottomPalette(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = [
+      ('yellow', const Color(0xFFFFD54F)),
+      ('red', const Color(0xFFE53935)),
+      ('blue', const Color(0xFF1E88E5)),
+      ('green', const Color(0xFF43A047)),
+      ('black', Colors.black),
+    ];
+    return Material(
+      elevation: 6,
+      color: theme.colorScheme.surfaceContainer,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: 'pen',
+                      icon: Icon(Icons.edit_outlined),
+                      label: Text('Pen'),
+                    ),
+                    ButtonSegment(
+                      value: 'highlighter',
+                      icon: Icon(Icons.border_color_outlined),
+                      label: Text('Highlighter'),
+                    ),
+                    ButtonSegment(
+                      value: 'eraser',
+                      icon: Icon(Icons.cleaning_services_outlined),
+                      label: Text('Eraser'),
+                    ),
+                  ],
+                  selected: {_markupTool},
+                  onSelectionChanged: (set) {
+                    if (set.isNotEmpty) {
+                      setState(() => _markupTool = set.first);
+                    }
+                  },
+                ),
+              ),
+              if (_markupTool != 'eraser') ...[
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (final c in colors)
+                        GestureDetector(
+                          onTap: () => setState(() => _markupColor = c.$1),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: c.$2,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _markupColor == c.$1
+                                    ? theme.colorScheme.primary
+                                    : Colors.grey.shade400,
+                                width: _markupColor == c.$1 ? 3 : 1.5,
+                              ),
+                              boxShadow: _markupColor == c.$1
+                                  ? [
+                                      BoxShadow(
+                                        color: c.$2.withValues(alpha: 0.5),
+                                        blurRadius: 6,
+                                        spreadRadius: 1,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 16),
+                      PopupMenuButton<double>(
+                        tooltip: 'Stroke thickness',
+                        initialValue: _markupWidth,
+                        onSelected: (w) => setState(() => _markupWidth = w),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 2.0, child: Text('Fine (2pt)')),
+                          PopupMenuItem(value: 4.0, child: Text('Medium (4pt)')),
+                          PopupMenuItem(value: 8.0, child: Text('Thick (8pt)')),
+                          PopupMenuItem(value: 14.0, child: Text('Heavy (14pt)')),
+                        ],
+                        child: Chip(
+                          avatar: const Icon(Icons.line_weight, size: 16),
+                          label: Text('${_markupWidth.toInt()}pt'),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSignBottomPalette(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasSignature = (_activeSignatureTyped != null && _activeSignatureTyped!.isNotEmpty) ||
+        _activeSignatureImage != null;
+    return Material(
+      elevation: 6,
+      color: theme.colorScheme.surfaceContainer,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            hasSignature ? Icons.check_circle : Icons.warning_amber_rounded,
+                            color: hasSignature ? Colors.green : Colors.orange,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              hasSignature
+                                  ? (_draftSignaturePositionPx != null
+                                      ? 'Tap & drag signature to adjust'
+                                      : 'Tap on page to place signature')
+                                  : 'No signature configured',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _promptCreateSignature,
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: Text(hasSignature ? 'Change' : 'Create'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Size: ${_draftSignatureWidthPx.toInt()} × ${_draftSignatureHeightPx.toInt()} pt',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Shrink signature',
+                        iconSize: 20,
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(),
+                        onPressed: () {
+                          setState(() {
+                            _draftSignatureWidthPx = (_draftSignatureWidthPx * 0.85).clamp(60.0, 400.0);
+                            _draftSignatureHeightPx = (_draftSignatureHeightPx * 0.85).clamp(30.0, 200.0);
+                          });
+                        },
+                        icon: const Icon(Icons.zoom_out),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Enlarge signature',
+                        iconSize: 20,
+                        padding: const EdgeInsets.all(4),
+                        constraints: const BoxConstraints(),
+                        onPressed: () {
+                          setState(() {
+                            _draftSignatureWidthPx = (_draftSignatureWidthPx * 1.15).clamp(60.0, 400.0);
+                            _draftSignatureHeightPx = (_draftSignatureHeightPx * 1.15).clamp(30.0, 200.0);
+                          });
+                        },
+                        icon: const Icon(Icons.zoom_in),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<WorkflowOutcome> _openPages() async {
     final engine = _engine;
     final doc = _doc;
@@ -2005,7 +2963,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         return await _openSecure();
       case 'compress':
       case 'compare':
-        return await _openExport();
+        return await _openExport(initialAction: action);
       default:
         return WorkflowOutcome.completed;
     }
@@ -2124,6 +3082,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       _undoLabel = null;
       _redoLabel = null;
       _markers = [];
+      _verticalPageImages.clear();
+      _horizontalPageImages.clear();
       _status = 'Choose a task or open a PDF';
     });
   }
@@ -2295,64 +3255,188 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         if (!didPop) _goHome();
       },
       child: Scaffold(
-        appBar: AppBar(
-          leading: _doc == null
-              ? null
-              : IconButton(
-                  onPressed: _busy ? null : _goHome,
-                  tooltip: 'Close document',
-                  icon: const Icon(Icons.arrow_back),
-                ),
-          title: Text(
-            _name ?? 'PdfCraft Mobile',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: [
-            if (_doc != null) ...[
-              IconButton(
-                onPressed: _busy || _undoLabel == null ? null : _undo,
-                icon: const Icon(Icons.undo),
-                tooltip: _undoLabel == null
-                    ? 'Nothing to undo'
-                    : 'Undo $_undoLabel',
-              ),
-              PopupMenuButton<String>(
-                tooltip: 'Document options',
-                enabled: !_busy,
-                onSelected: (value) {
-                  switch (value) {
-                    case 'redo':
-                      _redo();
-                    case 'find':
-                      setState(() => _finding = true);
-                    case 'open':
-                      _open();
-                  }
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(
-                    value: 'redo',
-                    enabled: _redoLabel != null,
-                    child: Text(
-                      _redoLabel == null
-                          ? 'Nothing to redo'
-                          : 'Redo $_redoLabel',
+        appBar: (_doc != null && !_showChrome && _canvasMode == DocumentInteractionMode.read)
+            ? null
+            : (_canvasMode == DocumentInteractionMode.markup
+                ? AppBar(
+                    leading: IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Cancel markup',
+                      onPressed: _cancelMarkup,
                     ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'find',
-                    child: Text('Find in PDF'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'open',
-                    child: Text('Open another PDF'),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
+                    title: Text('Markup · Page $_page'),
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.undo),
+                        tooltip: 'Undo last stroke',
+                        onPressed: _canvasStrokes.isNotEmpty ? _undoLastCanvasStroke : null,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilledButton(
+                          onPressed: _busy || _canvasStrokes.isEmpty ? null : _applyCanvasStrokes,
+                          child: const Text('Apply'),
+                        ),
+                      ),
+                    ],
+                  )
+                : (_canvasMode == DocumentInteractionMode.sign
+                    ? AppBar(
+                        leading: IconButton(
+                          icon: const Icon(Icons.close),
+                          tooltip: 'Cancel placement',
+                          onPressed: _cancelSign,
+                        ),
+                        title: Text('Place Signature · Page $_page'),
+                        actions: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: FilledButton(
+                              onPressed: _busy || _draftSignaturePositionPx == null
+                                  ? null
+                                  : _applySignaturePlacement,
+                              child: const Text('Place'),
+                            ),
+                          ),
+                        ],
+                      )
+                    : AppBar(
+                        leading: _doc == null
+                            ? null
+                            : IconButton(
+                                onPressed: _busy ? null : _goHome,
+                                tooltip: 'Close document',
+                                icon: const Icon(Icons.arrow_back),
+                              ),
+                        title: Text(
+                          _name ?? 'PdfCraft Mobile',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        actions: [
+                          PopupMenuButton<PdfCraftThemeChoice>(
+                            tooltip: 'Color theme',
+                            icon: Icon(
+                              PdfCraftThemeScope.maybeOf(context)?.notifier?.choice.icon ??
+                                  Icons.brightness_auto,
+                            ),
+                            onSelected: (choice) {
+                              unawaited(PdfCraftThemeScope.maybeOf(context)?.notifier?.setChoice(choice) ?? Future<void>.value());
+                            },
+                            itemBuilder: (_) => PdfCraftThemeChoice.values
+                                .map(
+                                  (choice) => PopupMenuItem<PdfCraftThemeChoice>(
+                                    value: choice,
+                                    child: Row(
+                                      children: [
+                                        Icon(choice.icon),
+                                        const SizedBox(width: 8),
+                                        Text(choice.label),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                          if (_doc != null) ...[
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 8,
+                                horizontal: 4,
+                              ),
+                              child: FilledButton.tonal(
+                                onPressed: _busy ? null : _finishDocument,
+                                child: const Text('Finish'),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: _busy ? null : _print,
+                              icon: const Icon(Icons.print_outlined),
+                              tooltip: 'Print this PDF',
+                            ),
+                            PopupMenuButton<ReadingMode>(
+                              tooltip: 'Reading view',
+                              icon: Icon(_readingMode.icon),
+                              onSelected: (mode) => unawaited(_setReadingMode(mode)),
+                              itemBuilder: (_) => ReadingMode.values
+                                  .map(
+                                    (mode) => PopupMenuItem<ReadingMode>(
+                                      value: mode,
+                                      child: Row(
+                                        children: [
+                                          Icon(mode.icon),
+                                          const SizedBox(width: 8),
+                                          Text(mode.label),
+                                          if (mode == _readingMode) ...[
+                                            const Spacer(),
+                                            const Icon(Icons.check, size: 18),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                            IconButton(
+                              onPressed: _busy || _undoLabel == null ? null : _undo,
+                              icon: const Icon(Icons.undo),
+                              tooltip: _undoLabel == null
+                                  ? 'Nothing to undo'
+                                  : 'Undo $_undoLabel',
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: 'Document options',
+                              enabled: !_busy,
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'redo':
+                                    _redo();
+                                  case 'find':
+                                    setState(() => _finding = true);
+                                  case 'invertColors':
+                                    unawaited(_setInvertedColors(!_invertDocumentColors));
+                                    break;
+                                  case 'open':
+                                    _open();
+                                }
+                              },
+                              itemBuilder: (_) => [
+                                PopupMenuItem(
+                                  value: 'redo',
+                                  enabled: _redoLabel != null,
+                                  child: Text(
+                                    _redoLabel == null
+                                        ? 'Nothing to redo'
+                                        : 'Redo $_redoLabel',
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'find',
+                                  child: Text('Find in PDF'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'invertColors',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        _invertDocumentColors
+                                            ? Icons.invert_colors
+                                            : Icons.invert_colors_off_outlined,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text('Invert page colors'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'open',
+                                  child: Text('Open another PDF'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ))),
         body: Column(
           children: [
             if (_doc != null)
@@ -2380,22 +3464,45 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
               ),
             if (_busy) const LinearProgressIndicator(),
             Expanded(
-              child: _png == null
-                  ? _doc == null
+              child: Builder(
+                builder: (context) {
+                  if (_readingMode == ReadingMode.vertical) {
+                    return _verticalPageList();
+                  }
+                  if (_readingMode == ReadingMode.horizontalContinuous) {
+                    return _horizontalPageList();
+                  }
+                  if (_png == null) {
+                    return _doc == null
                         ? _emptyDocumentHome()
-                        : Center(child: Text(_status))
-                  : LayoutBuilder(
+                        : Center(child: Text(_status));
+                  }
+                  return LayoutBuilder(
                       builder: (context, constraints) {
                         final sourceWidth = _imageWidthPx ?? 1;
                         final sourceHeight = _imageHeightPx ?? 1;
+                        final secondWidth = _secondImageWidthPx ?? 0;
+                        final secondHeight = _secondImageHeightPx ?? 0;
+                        final facing =
+                            _readingMode == ReadingMode.doublePage &&
+                            _secondPng != null;
+                        final gap = facing ? 16.0 : 0.0;
+                        final combinedSourceWidth = sourceWidth + (facing ? gap + secondWidth : 0);
+                        final combinedSourceHeight = sourceHeight > 0
+                            ? (facing
+                                ? math.max(sourceHeight, secondHeight)
+                                : sourceHeight)
+                            : 1.0;
                         final fitScale = fitPageScale(
                           viewportWidth: constraints.maxWidth,
                           viewportHeight: constraints.maxHeight,
-                          pageWidth: sourceWidth,
-                          pageHeight: sourceHeight,
+                          pageWidth: facing ? combinedSourceWidth : sourceWidth,
+                          pageHeight: facing ? combinedSourceHeight : sourceHeight,
                         );
                         final pageWidth = sourceWidth * fitScale;
                         final pageHeight = sourceHeight * fitScale;
+                        final secondPageWidth = secondWidth * fitScale;
+                        final secondPageHeight = secondHeight * fitScale;
                         final selectionStart =
                             _textSelectionAnchor == null ||
                                 _textSelectionExtent == null
@@ -2493,6 +3600,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                               onPointerCancel: _onViewerPointerCancel,
                               child: InteractiveViewer(
                                 transformationController: _viewerTransform,
+                                panEnabled: _canvasMode == DocumentInteractionMode.read,
+                                scaleEnabled: _canvasMode == DocumentInteractionMode.read,
                                 onInteractionUpdate: (_) {
                                   if (_viewerTransform.value
                                           .getMaxScaleOnAxis() >
@@ -2509,15 +3618,79 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                 clipBehavior: Clip.hardEdge,
                                 child: Center(
                                   child: SizedBox(
-                                    width: pageWidth,
+                                    width: facing
+                                        ? pageWidth +
+                                            16 * fitScale.clamp(0.1, 1.0) +
+                                            secondPageWidth
+                                        : pageWidth,
                                     height: pageHeight,
                                     child: GestureDetector(
                                       behavior: HitTestBehavior.opaque,
+                                      onTap: () {
+                                        if (_canvasMode == DocumentInteractionMode.read &&
+                                            _textSelectionAnchor == null) {
+                                          setState(() => _showChrome = !_showChrome);
+                                        }
+                                      },
+                                      onTapDown: (details) {
+                                        if (_canvasMode == DocumentInteractionMode.sign) {
+                                          setState(() {
+                                            _draftSignaturePositionPx = Offset(
+                                              (details.localPosition.dx / fitScale)
+                                                  .clamp(0.0, (sourceWidth - _draftSignatureWidthPx).clamp(0.0, sourceWidth)),
+                                              (details.localPosition.dy / fitScale)
+                                                  .clamp(0.0, (sourceHeight - _draftSignatureHeightPx).clamp(0.0, sourceHeight)),
+                                            );
+                                          });
+                                        }
+                                      },
+                                      onPanStart: (details) {
+                                        if (_canvasMode == DocumentInteractionMode.markup) {
+                                          final local = Offset(
+                                            (details.localPosition.dx / fitScale).clamp(0.0, sourceWidth),
+                                            (details.localPosition.dy / fitScale).clamp(0.0, sourceHeight),
+                                          );
+                                          setState(() {
+                                            _activeStroke = [local];
+                                          });
+                                        }
+                                      },
+                                      onPanUpdate: (details) {
+                                        if (_canvasMode == DocumentInteractionMode.markup) {
+                                          final local = Offset(
+                                            (details.localPosition.dx / fitScale).clamp(0.0, sourceWidth),
+                                            (details.localPosition.dy / fitScale).clamp(0.0, sourceHeight),
+                                          );
+                                          setState(() {
+                                            _activeStroke.add(local);
+                                          });
+                                        }
+                                      },
+                                      onPanEnd: (_) {
+                                        if (_canvasMode == DocumentInteractionMode.markup &&
+                                            _activeStroke.length > 1) {
+                                          setState(() {
+                                            final isHighlighter = _markupTool == 'highlighter';
+                                            _canvasStrokes.add(
+                                              annotation_geo.InkStroke(
+                                                points: [
+                                                  for (final p in _activeStroke)
+                                                    annotation_geo.Point(p.dx, p.dy),
+                                                ],
+                                                color: _markupColor,
+                                                width: isHighlighter ? 14.0 : _markupWidth,
+                                              ),
+                                            );
+                                            _activeStroke = [];
+                                          });
+                                        }
+                                      },
                                       onDoubleTapDown: (details) =>
                                           _doubleTapPosition =
                                               details.localPosition,
                                       onDoubleTap: () {
-                                        if (_busy ||
+                                        if (_canvasMode != DocumentInteractionMode.read ||
+                                            _busy ||
                                             _doubleTapPosition == null) {
                                           return;
                                         }
@@ -2576,32 +3749,167 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                                 );
                                         }
                                       },
-                                      onLongPressStart: (details) =>
+                                      onLongPressStart: (details) {
+                                        if (_canvasMode == DocumentInteractionMode.read) {
                                           _beginTextSelection(
                                             details.localPosition,
                                             fitScale,
-                                          ),
-                                      onLongPressMoveUpdate: (details) =>
+                                          );
+                                        }
+                                      },
+                                      onLongPressMoveUpdate: (details) {
+                                        if (_canvasMode == DocumentInteractionMode.read) {
                                           _extendTextSelection(
                                             details.localPosition,
                                             fitScale,
-                                          ),
+                                          );
+                                        }
+                                      },
                                       onLongPressEnd: (_) =>
                                           _viewerLongPressSelecting = false,
                                       child: Stack(
                                         key: _viewerPageKey,
                                         fit: StackFit.expand,
                                         children: [
-                                          Semantics(
-                                            image: true,
-                                            label:
-                                                'Document page $_page of $_pageCount',
-                                            child: Image.memory(
-                                              _png!,
-                                              fit: BoxFit.fill,
-                                              gaplessPlayback: true,
+                                          if (facing)
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                SizedBox(
+                                                  width: pageWidth,
+                                                  height: pageHeight,
+                                                  child: _documentImage(_png!),
+                                                ),
+                                                SizedBox(width: 16 * fitScale.clamp(0.1, 1.0)),
+                                                SizedBox(
+                                                  width: secondPageWidth,
+                                                  height: secondPageHeight,
+                                                  child: _documentImage(_secondPng!),
+                                                ),
+                                              ],
+                                            )
+                                          else
+                                            Semantics(
+                                              image: true,
+                                              label:
+                                                  'Document page $_page of $_pageCount',
+                                              child: _documentImage(_png!),
+                                            ),
+                                          // In-canvas Markup layer
+                                          CustomPaint(
+                                            painter: _CanvasStrokePainter(
+                                              strokes: _canvasStrokes,
+                                              activeStroke: _activeStroke,
+                                              activeTool: _markupTool,
+                                              activeColor: _markupColor,
+                                              activeWidth: _markupWidth,
+                                              fitScale: fitScale,
                                             ),
                                           ),
+                                          // In-canvas Signature placement box
+                                          if (_canvasMode == DocumentInteractionMode.sign &&
+                                              _draftSignaturePositionPx != null)
+                                            Positioned(
+                                              left: _draftSignaturePositionPx!.dx * fitScale,
+                                              top: _draftSignaturePositionPx!.dy * fitScale,
+                                              child: GestureDetector(
+                                                onPanUpdate: (details) {
+                                                  setState(() {
+                                                    _draftSignaturePositionPx = Offset(
+                                                      (_draftSignaturePositionPx!.dx +
+                                                              details.delta.dx / fitScale)
+                                                          .clamp(0.0, (sourceWidth - _draftSignatureWidthPx).clamp(0.0, sourceWidth)),
+                                                      (_draftSignaturePositionPx!.dy +
+                                                              details.delta.dy / fitScale)
+                                                          .clamp(0.0, (sourceHeight - _draftSignatureHeightPx).clamp(0.0, sourceHeight)),
+                                                    );
+                                                  });
+                                                },
+                                                child: Container(
+                                                  width: _draftSignatureWidthPx * fitScale,
+                                                  height: _draftSignatureHeightPx * fitScale,
+                                                  decoration: BoxDecoration(
+                                                    border: Border.all(
+                                                      color: Theme.of(context).colorScheme.primary,
+                                                      width: 2,
+                                                    ),
+                                                    borderRadius: BorderRadius.circular(4),
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primaryContainer
+                                                        .withValues(alpha: 0.35),
+                                                  ),
+                                                  child: Stack(
+                                                    children: [
+                                                      Center(
+                                                        child: _activeSignatureIsDate
+                                                            ? Text(
+                                                                DateTime.now()
+                                                                    .toLocal()
+                                                                    .toString()
+                                                                    .split(' ')[0],
+                                                                style: const TextStyle(
+                                                                  fontWeight: FontWeight.bold,
+                                                                  fontSize: 16,
+                                                                ),
+                                                              )
+                                                            : _activeSignatureImage != null
+                                                                ? Image.memory(
+                                                                    _activeSignatureImage!,
+                                                                    fit: BoxFit.contain,
+                                                                  )
+                                                                : Text(
+                                                                    _activeSignatureTyped ??
+                                                                        'Signature',
+                                                                    style: const TextStyle(
+                                                                      fontFamily: 'serif',
+                                                                      fontStyle:
+                                                                          FontStyle.italic,
+                                                                      fontSize: 20,
+                                                                    ),
+                                                                  ),
+                                                      ),
+                                                      Positioned(
+                                                        right: 0,
+                                                        bottom: 0,
+                                                        child: GestureDetector(
+                                                          onPanUpdate: (details) {
+                                                            setState(() {
+                                                              _draftSignatureWidthPx =
+                                                                  (_draftSignatureWidthPx +
+                                                                          details.delta.dx /
+                                                                              fitScale)
+                                                                      .clamp(80.0, 400.0);
+                                                              _draftSignatureHeightPx =
+                                                                  (_draftSignatureHeightPx +
+                                                                          details.delta.dy /
+                                                                              fitScale)
+                                                                      .clamp(30.0, 200.0);
+                                                            });
+                                                          },
+                                                          child: Container(
+                                                            width: 22,
+                                                            height: 22,
+                                                            decoration: BoxDecoration(
+                                                              color: Theme.of(context)
+                                                                  .colorScheme
+                                                                  .primary,
+                                                              shape: BoxShape.circle,
+                                                            ),
+                                                            child: const Icon(
+                                                              Icons.open_in_full,
+                                                              size: 13,
+                                                              color: Colors.white,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
                                           if (_finding &&
                                               _findMatches.isNotEmpty)
                                             for (
@@ -3075,67 +4383,23 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
+                            // Floating glass page stepper
+                            if (_showChrome && _canvasMode == DocumentInteractionMode.read)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 16,
+                                child: Center(
+                                  child: _buildFloatingPageStepper(context),
+                                ),
+                              ),
                           ],
                         );
                       },
-                    ),
-            ),
-            if (_doc != null) ...[
-              const Divider(height: 1),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    tooltip: 'Previous page',
-                    onPressed: _busy || _page <= 1
-                        ? null
-                        : () => _goto(_page - 1),
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  TextButton(
-                    onPressed: _busy ? null : _goToPagePrompt,
-                    child: Text('Page $_page of $_pageCount'),
-                  ),
-                  IconButton(
-                    tooltip: 'Next page',
-                    onPressed: _busy || _page >= _pageCount
-                        ? null
-                        : () => _goto(_page + 1),
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                ],
-              ),
-              SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: _busy ? null : _showTools,
-                          icon: const Icon(Icons.tune),
-                          label: const Text('Tools'),
-                        ),
-                      ),
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: _busy ? null : _openPages,
-                          icon: const Icon(Icons.grid_view_outlined),
-                          label: const Text('Pages'),
-                        ),
-                      ),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: _busy ? null : _finishDocument,
-                          child: const Text('Finish'),
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              ),
-            ],
+            ),
             if (_busy)
               Padding(
                 padding: const EdgeInsets.all(8),
@@ -3143,6 +4407,13 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
               ),
           ],
         ),
+        bottomNavigationBar: (_doc == null || !_showChrome)
+            ? null
+            : (_canvasMode == DocumentInteractionMode.markup
+                ? _buildMarkupBottomPalette(context)
+                : (_canvasMode == DocumentInteractionMode.sign
+                    ? _buildSignBottomPalette(context)
+                    : _buildReadNavigationBar(context))),
       ),
     );
   }
@@ -3223,91 +4494,373 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   Widget _emptyDocumentHome() {
     final enabled = !_busy && !_launchingTask && _engine != null;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 680),
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           children: [
-            Text(
-              'What would you like to do?',
-              style: Theme.of(context).textTheme.headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            const Text('Work on your PDFs on this device.'),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: enabled ? _open : null,
-              icon: const Icon(Icons.folder_open),
-              label: const Text('Open a PDF'),
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton.icon(
-              onPressed: enabled ? _showTools : null,
-              icon: const Icon(Icons.search),
-              label: const Text('Browse all tools'),
-            ),
-            const SizedBox(height: 12),
-            for (final task in pdfTasks.take(6))
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 4,
-                ),
-                leading: Icon(
-                  task.icon,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                title: Text(task.title),
-                subtitle: Text(task.description),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: enabled ? () => _launchTask(task) : null,
-              ),
-
-            const SizedBox(height: 24),
-            if (_engine == null) ...[
-              Text(_status, style: Theme.of(context).textTheme.bodySmall),
-              if (_status.contains('failed'))
-                TextButton(
-                  onPressed: _initEngine,
-                  child: const Text('Try again'),
-                ),
-            ],
-            if (_recentDocuments.isNotEmpty) ...[
-              Text(
-                'Recent documents',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              for (final item in _recentDocuments)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.description_outlined),
-                  title: Text(
-                    item.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+            // Privacy & offline assurance badge
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  subtitle: Text(
-                    '${item.pageCount} ${item.pageCount == 1 ? 'page' : 'pages'}',
-                  ),
-                  onTap: enabled ? () => _openRecent(item) : null,
-                  trailing: PopupMenuButton<String>(
-                    tooltip: 'Options for ${item.name}',
-                    onSelected: (_) async {
-                      await _recentStore.removeRecent(item.name);
-                      await _loadRecents();
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(
-                        value: 'remove',
-                        child: Text('Remove from recents'),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.shield_outlined, size: 14, color: colorScheme.onPrimaryContainer),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Offline & Private',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'What would you like to do?',
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Work on your PDFs on this device.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Hero "Open a PDF" Card
+            Card(
+              elevation: 0,
+              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+                ),
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: enabled ? _open : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.folder_open,
+                              color: Colors.white,
+                              size: 26,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Choose Document',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Select any PDF from your device storage to view or edit',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: enabled ? _open : null,
+                          icon: const Icon(Icons.folder_open),
+                          label: const Text('Open a PDF'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Quick Create shortcut
+            Card(
+              elevation: 0,
+              color: colorScheme.surfaceContainerLow,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                ),
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: enabled ? _newBlankPdf : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.note_add_outlined, size: 22, color: colorScheme.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'New Blank PDF',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Create a clean empty canvas document',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right, size: 20, color: colorScheme.onSurfaceVariant),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            Text(
+              'Popular tools',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: enabled ? _showTools : null,
+                icon: const Icon(Icons.search, size: 18),
+                label: const Text('Browse all tools'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Common tasks card list
+            Card(
+              elevation: 0,
+              color: colorScheme.surfaceContainerLow,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < pdfTasks.take(6).length; i++) ...[
+                      if (i > 0)
+                        Divider(
+                          height: 1,
+                          indent: 56,
+                          color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                        ),
+                      ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 4,
+                        ),
+                        leading: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: colorScheme.primaryContainer.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            pdfTasks[i].icon,
+                            size: 20,
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        title: Text(
+                          pdfTasks[i].title,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(
+                          pdfTasks[i].description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Icon(
+                          Icons.chevron_right,
+                          size: 20,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        onTap: enabled ? () => _launchTask(pdfTasks[i]) : null,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+            if (_engine == null) ...[
+              Card(
+                color: colorScheme.errorContainer.withValues(alpha: 0.3),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: colorScheme.error),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _status,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                      if (_status.contains('failed'))
+                        TextButton(
+                          onPressed: _initEngine,
+                          child: const Text('Try again'),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ],
+
+            if (_recentDocuments.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Recent documents',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                elevation: 0,
+                color: colorScheme.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < _recentDocuments.length; i++) ...[
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            indent: 56,
+                            color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                          ),
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 4,
+                          ),
+                          leading: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: colorScheme.secondaryContainer.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.description_outlined,
+                              size: 20,
+                              color: colorScheme.secondary,
+                            ),
+                          ),
+                          title: Text(
+                            _recentDocuments[i].name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                          subtitle: Text(
+                            '${_recentDocuments[i].pageCount} ${_recentDocuments[i].pageCount == 1 ? 'page' : 'pages'}',
+                          ),
+                          onTap: enabled ? () => _openRecent(_recentDocuments[i]) : null,
+                          trailing: PopupMenuButton<String>(
+                            tooltip: 'Options for ${_recentDocuments[i].name}',
+                            onSelected: (_) async {
+                              await _recentStore.removeRecent(_recentDocuments[i].name);
+                              await _loadRecents();
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
+                                value: 'remove',
+                                child: Text('Remove from recents'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 32),
           ],
         ),
       ),
@@ -3338,3 +4891,79 @@ String _commentMarkerLabel(String type) => switch (type.toLowerCase()) {
   'square' || 'rectangle' => 'Rectangle',
   _ => '${type[0].toUpperCase()}${type.substring(1).toLowerCase()}',
 };
+
+class _CanvasStrokePainter extends CustomPainter {
+  const _CanvasStrokePainter({
+    required this.strokes,
+    required this.activeStroke,
+    required this.activeTool,
+    required this.activeColor,
+    required this.activeWidth,
+    required this.fitScale,
+  });
+
+  final List<annotation_geo.InkStroke> strokes;
+  final List<Offset> activeStroke;
+  final String activeTool;
+  final String activeColor;
+  final double activeWidth;
+  final double fitScale;
+
+  Color _resolveColor(String name) {
+    switch (name.toLowerCase()) {
+      case 'yellow':
+        return const Color(0xFFFFD54F);
+      case 'red':
+        return const Color(0xFFE53935);
+      case 'blue':
+        return const Color(0xFF1E88E5);
+      case 'green':
+        return const Color(0xFF43A047);
+      case 'black':
+        return Colors.black;
+      case 'white':
+        return Colors.white;
+      default:
+        return const Color(0xFFFFD54F);
+    }
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final stroke in strokes) {
+      if (stroke.points.length < 2) continue;
+      final isHighlighter = stroke.width >= 10.0;
+      final paint = Paint()
+        ..color = _resolveColor(stroke.color).withValues(alpha: isHighlighter ? 0.38 : 0.95)
+        ..strokeWidth = stroke.width * fitScale
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      final path = Path();
+      path.moveTo(stroke.points[0].x * fitScale, stroke.points[0].y * fitScale);
+      for (var i = 1; i < stroke.points.length; i++) {
+        path.lineTo(stroke.points[i].x * fitScale, stroke.points[i].y * fitScale);
+      }
+      canvas.drawPath(path, paint);
+    }
+
+    if (activeStroke.length >= 2 && activeTool != 'eraser') {
+      final isHighlighter = activeTool == 'highlighter';
+      final paint = Paint()
+        ..color = _resolveColor(activeColor).withValues(alpha: isHighlighter ? 0.38 : 0.95)
+        ..strokeWidth = (isHighlighter ? 14.0 : activeWidth) * fitScale
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke;
+      final path = Path();
+      path.moveTo(activeStroke[0].dx * fitScale, activeStroke[0].dy * fitScale);
+      for (var i = 1; i < activeStroke.length; i++) {
+        path.lineTo(activeStroke[i].dx * fitScale, activeStroke[i].dy * fitScale);
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CanvasStrokePainter oldDelegate) => true;
+}

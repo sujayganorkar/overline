@@ -35,6 +35,7 @@ List<String> outputPathsIn(String jsonSource) {
 
     void visit(Object? node) {
       if (node is Map<String, dynamic>) {
+        if (node['written'] == false) return;
         final hasOutput = node['output'] is String || node['out'] is String;
         for (final entry in node.entries) {
           final v = entry.value;
