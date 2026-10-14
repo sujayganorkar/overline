@@ -652,8 +652,8 @@ class _PageGridState extends State<PageGrid> {
                           button: true,
                           hint: _selecting
                               ? (selectedForDelete
-                                  ? 'Double tap to deselect'
-                                  : 'Double tap to select')
+                                    ? 'Double tap to deselect'
+                                    : 'Double tap to select')
                               : 'Double tap to jump to page $page. Double tap and hold to select for bulk actions.',
                           child: GestureDetector(
                             onTap: () {
@@ -711,56 +711,59 @@ class _PageGridState extends State<PageGrid> {
                                               );
                                             },
                                           ),
-                                        if (_selecting)
-                                          Align(
-                                            alignment: Alignment.topRight,
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(6),
-                                              child: Icon(
-                                                selectedForDelete
-                                                    ? Icons.check_circle
-                                                    : Icons.circle_outlined,
-                                                color: selectedForDelete
-                                                    ? Theme.of(context)
-                                                          .colorScheme
-                                                          .error
-                                                    : Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
-                                                size: 28,
+                                          if (_selecting)
+                                            Align(
+                                              alignment: Alignment.topRight,
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(
+                                                  6,
+                                                ),
+                                                child: Icon(
+                                                  selectedForDelete
+                                                      ? Icons.check_circle
+                                                      : Icons.circle_outlined,
+                                                  color: selectedForDelete
+                                                      ? Theme.of(context)
+                                                            .colorScheme
+                                                            .error
+                                                      : Theme.of(context)
+                                                            .colorScheme
+                                                            .onSurfaceVariant,
+                                                  size: 28,
+                                                ),
                                               ),
                                             ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 48,
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          '$page',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
+                                        if (!_selecting)
+                                          IconButton(
+                                            tooltip: 'Page $page actions',
+                                            onPressed: () => _pageMenu(page),
+                                            icon: const Icon(Icons.more_horiz),
                                           ),
                                       ],
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  height: 48,
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        '$page',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                      ),
-                                      if (!_selecting)
-                                        IconButton(
-                                          tooltip: 'Page $page actions',
-                                          onPressed: () => _pageMenu(page),
-                                          icon: const Icon(Icons.more_horiz),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
                     ),
             ),
             if (_selecting)

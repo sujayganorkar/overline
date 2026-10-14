@@ -4,6 +4,10 @@ import 'dart:typed_data';
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+
+import 'task_catalog.dart';
+import 'task_workspace.dart';
+
 import 'package:share_plus/share_plus.dart';
 
 import '../bridge/api.dart' as bridge;
@@ -22,6 +26,7 @@ class ExportSheet extends StatefulWidget {
     required this.pageCount,
     required this.onStatusChanged,
     this.initialAction,
+    this.documentName,
   });
 
   final PdfEngineApi engine;
@@ -30,6 +35,7 @@ class ExportSheet extends StatefulWidget {
   final int pageCount;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
   final String? initialAction;
+  final String? documentName;
 
   @override
   State<ExportSheet> createState() => _ExportSheetState();
@@ -37,17 +43,55 @@ class ExportSheet extends StatefulWidget {
 
 class _ExportSheetState extends State<ExportSheet> {
   bool _busy = false;
-  String? _progress;
-
   @override
   void initState() {
     super.initState();
-    if (widget.initialAction == 'compress') {
+    if (widget.initialAction != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _compressToTarget();
+        if (mounted) _startTask();
       });
     }
   }
+
+  Future<void> _verify() async {
+    final response = await _run('pdfa_verify', {}, refreshStatus: false);
+    if (response == null || !mounted) return;
+    await _showReport(
+      'PDF/A verification',
+      response.contents
+          .where((content) => content.json.isNotEmpty)
+          .map((content) => humanizeToolResult('PDF/A check', content.json))
+          .join('\n'),
+    );
+  }
+
+  Future<void> _startTask() async {
+    if (_busy) return;
+    switch (widget.initialAction) {
+      case 'compress':
+        await _compressToTarget();
+      case 'compressionPresets':
+        await _compress();
+      case 'office':
+        await _exportOffice();
+      case 'exportImages':
+        await _exportImages();
+      case 'exportText':
+        await _exportSingle('doc_export_text', 'export.txt');
+      case 'measurements':
+        await _exportMeasurements();
+      case 'ocr':
+        await _ocr();
+      case 'ocrBatch':
+        await _ocrBatch();
+      case 'compare':
+        await _compare();
+      case 'verify':
+        await _verify();
+    }
+  }
+
+  String? _progress;
 
   Future<bridge.OperationResponse?> _run(
     String tool,
@@ -526,11 +570,36 @@ class _ExportSheetState extends State<ExportSheet> {
         builder: (dialogCtx) => StatefulBuilder(
           builder: (dialogCtx, setModalState) {
             final presets = [
-              (label: '< 100 KB', value: 100.0, unit: 'KB', tip: 'Strict portal limit'),
-              (label: '< 200 KB', value: 200.0, unit: 'KB', tip: 'Gov / Visa portal standard'),
-              (label: '< 500 KB', value: 500.0, unit: 'KB', tip: 'Job application & resume'),
-              (label: '< 1 MB', value: 1.0, unit: 'MB', tip: 'Web portal ceiling'),
-              (label: '< 2 MB', value: 2.0, unit: 'MB', tip: 'Email attachment ceiling'),
+              (
+                label: '< 100 KB',
+                value: 100.0,
+                unit: 'KB',
+                tip: 'Strict portal limit',
+              ),
+              (
+                label: '< 200 KB',
+                value: 200.0,
+                unit: 'KB',
+                tip: 'Gov / Visa portal standard',
+              ),
+              (
+                label: '< 500 KB',
+                value: 500.0,
+                unit: 'KB',
+                tip: 'Job application & resume',
+              ),
+              (
+                label: '< 1 MB',
+                value: 1.0,
+                unit: 'MB',
+                tip: 'Web portal ceiling',
+              ),
+              (
+                label: '< 2 MB',
+                value: 2.0,
+                unit: 'MB',
+                tip: 'Email attachment ceiling',
+              ),
             ];
             final currentVal = double.tryParse(controller.text.trim());
             return AlertDialog(
@@ -550,9 +619,14 @@ class _ExportSheetState extends State<ExportSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
-                        color: Theme.of(dialogCtx).colorScheme.surfaceContainerHighest,
+                        color: Theme.of(dialogCtx)
+                            .colorScheme
+                            .surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -560,15 +634,16 @@ class _ExportSheetState extends State<ExportSheet> {
                           Icon(
                             Icons.description_outlined,
                             size: 18,
-                            color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
+                            color: Theme.of(dialogCtx)
+                                .colorScheme
+                                .onSurfaceVariant,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Current size: ${_formatFileSize(original.length)}',
-                              style: Theme.of(dialogCtx).textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: Theme.of(dialogCtx).textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
@@ -577,10 +652,13 @@ class _ExportSheetState extends State<ExportSheet> {
                     const SizedBox(height: 14),
                     Text(
                       'Common portal limits',
-                      style: Theme.of(dialogCtx).textTheme.labelMedium?.copyWith(
-                        color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: Theme.of(dialogCtx).textTheme.labelMedium
+                          ?.copyWith(
+                            color: Theme.of(dialogCtx)
+                                .colorScheme
+                                .onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                     const SizedBox(height: 6),
                     Wrap(
@@ -590,14 +668,17 @@ class _ExportSheetState extends State<ExportSheet> {
                         for (final preset in presets)
                           ChoiceChip(
                             label: Text(preset.label),
-                            selected: selectedUnit == preset.unit &&
+                            selected:
+                                selectedUnit == preset.unit &&
                                 currentVal != null &&
                                 (currentVal - preset.value).abs() < 0.001,
                             onSelected: (selected) {
                               if (selected) {
                                 setModalState(() {
                                   selectedUnit = preset.unit;
-                                  controller.text = preset.value.truncateToDouble() == preset.value
+                                  controller.text =
+                                      preset.value.truncateToDouble() ==
+                                          preset.value
                                       ? preset.value.toInt().toString()
                                       : preset.value.toString();
                                 });
@@ -609,10 +690,13 @@ class _ExportSheetState extends State<ExportSheet> {
                     const SizedBox(height: 16),
                     Text(
                       'Custom target ceiling',
-                      style: Theme.of(dialogCtx).textTheme.labelMedium?.copyWith(
-                        color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: Theme.of(dialogCtx).textTheme.labelMedium
+                          ?.copyWith(
+                            color: Theme.of(dialogCtx)
+                                .colorScheme
+                                .onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -621,12 +705,19 @@ class _ExportSheetState extends State<ExportSheet> {
                         Expanded(
                           child: TextField(
                             controller: controller,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             decoration: InputDecoration(
                               labelText: 'Max size',
-                              hintText: selectedUnit == 'KB' ? 'e.g. 200' : 'e.g. 2',
+                              hintText: selectedUnit == 'KB'
+                                  ? 'e.g. 200'
+                                  : 'e.g. 2',
                               border: const OutlineInputBorder(),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
                             ),
                             onChanged: (_) => setModalState(() {}),
                           ),
@@ -642,12 +733,18 @@ class _ExportSheetState extends State<ExportSheet> {
                             setModalState(() {
                               final oldUnit = selectedUnit;
                               selectedUnit = values.first;
-                              final parsed = double.tryParse(controller.text.trim());
+                              final parsed = double.tryParse(
+                                controller.text.trim(),
+                              );
                               if (parsed != null && parsed > 0) {
                                 if (oldUnit == 'MB' && selectedUnit == 'KB') {
-                                  controller.text = (parsed * 1024).round().toString();
-                                } else if (oldUnit == 'KB' && selectedUnit == 'MB') {
-                                  controller.text = (parsed / 1024).toStringAsFixed(2);
+                                  controller.text = (parsed * 1024)
+                                      .round()
+                                      .toString();
+                                } else if (oldUnit == 'KB' &&
+                                    selectedUnit == 'MB') {
+                                  controller.text = (parsed / 1024)
+                                      .toStringAsFixed(2);
                                 }
                               }
                             });
@@ -677,7 +774,10 @@ class _ExportSheetState extends State<ExportSheet> {
                   onPressed: () {
                     final val = double.tryParse(controller.text.trim());
                     if (val != null && val > 0) {
-                      Navigator.pop(dialogCtx, (value: val, unit: selectedUnit));
+                      Navigator.pop(dialogCtx, (
+                        value: val,
+                        unit: selectedUnit,
+                      ));
                     }
                   },
                 ),
@@ -790,15 +890,23 @@ class _ExportSheetState extends State<ExportSheet> {
 
       if (outcome == 'share') {
         try {
-          await Share.shareXFiles(
-            [XFile.fromData(best, mimeType: 'application/pdf', name: 'compressed.pdf')],
-            subject: 'Compressed PDF ($targetLabel)',
+          await SharePlus.instance.share(
+            ShareParams(
+              files: [
+                XFile.fromData(
+                  best,
+                  mimeType: 'application/pdf',
+                  name: 'compressed.pdf',
+                ),
+              ],
+              subject: 'Compressed PDF ($targetLabel)',
+              fileNameOverrides: ['compressed.pdf'],
+            ),
           );
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Sharing failed: $e')),
-            );
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text('Sharing failed: $e')));
           }
         }
       } else if (outcome == 'save') {
@@ -979,8 +1087,8 @@ class _ExportSheetState extends State<ExportSheet> {
                                               child: ClipRect(
                                                 clipper:
                                                     _HorizontalSplitClipper(
-                                                  splitRatio,
-                                                ),
+                                                      splitRatio,
+                                                    ),
                                                 child: Image.memory(
                                                   originalPng,
                                                   fit: BoxFit.contain,
@@ -996,13 +1104,15 @@ class _ExportSheetState extends State<ExportSheet> {
                                               child: GestureDetector(
                                                 behavior:
                                                     HitTestBehavior.opaque,
-                                                onHorizontalDragUpdate:
-                                                    (details) {
+                                                onHorizontalDragUpdate: (details) {
                                                   setDialogState(() {
-                                                    splitRatio = (splitRatio +
-                                                            details.delta.dx /
-                                                                width)
-                                                        .clamp(0.05, 0.95);
+                                                    splitRatio =
+                                                        (splitRatio +
+                                                                details
+                                                                        .delta
+                                                                        .dx /
+                                                                    width)
+                                                            .clamp(0.05, 0.95);
                                                   });
                                                 },
                                                 child: Stack(
@@ -1015,13 +1125,11 @@ class _ExportSheetState extends State<ExportSheet> {
                                                     Container(
                                                       width: 28,
                                                       height: 28,
-                                                      decoration:
-                                                          BoxDecoration(
+                                                      decoration: BoxDecoration(
                                                         color: Theme.of(
                                                           dialogContext,
                                                         ).colorScheme.primary,
-                                                        shape:
-                                                            BoxShape.circle,
+                                                        shape: BoxShape.circle,
                                                         border: Border.all(
                                                           color: Colors.white,
                                                           width: 2,
@@ -1051,9 +1159,9 @@ class _ExportSheetState extends State<ExportSheet> {
                                               child: Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                  horizontal: 6,
-                                                  vertical: 2,
-                                                ),
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
                                                 decoration: BoxDecoration(
                                                   color: Colors.black54,
                                                   borderRadius:
@@ -1074,9 +1182,9 @@ class _ExportSheetState extends State<ExportSheet> {
                                               child: Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                  horizontal: 6,
-                                                  vertical: 2,
-                                                ),
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
                                                 decoration: BoxDecoration(
                                                   color: Colors.black54,
                                                   borderRadius:
@@ -1115,7 +1223,9 @@ class _ExportSheetState extends State<ExportSheet> {
                           children: [
                             Text(
                               'Original',
-                              style: Theme.of(dialogContext).textTheme.bodySmall,
+                              style: Theme.of(dialogContext)
+                                  .textTheme
+                                  .bodySmall,
                             ),
                             Expanded(
                               child: Slider(
@@ -1128,7 +1238,9 @@ class _ExportSheetState extends State<ExportSheet> {
                             ),
                             Text(
                               'Compressed',
-                              style: Theme.of(dialogContext).textTheme.bodySmall,
+                              style: Theme.of(dialogContext)
+                                  .textTheme
+                                  .bodySmall,
                             ),
                           ],
                         ),
@@ -1197,6 +1309,21 @@ class _ExportSheetState extends State<ExportSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.initialAction != null) {
+      final task = pdfTasks.firstWhere(
+        (task) => task.id == widget.initialAction,
+      );
+      return TaskWorkspace(
+        title: task.title,
+        description: task.description,
+        scope:
+            '${widget.documentName ?? 'Current PDF'} • ${widget.pageCount} pages',
+        busy: _busy,
+        onStart: _startTask,
+        progress: _progress,
+      );
+    }
+
     return SafeArea(
       child: SingleChildScrollView(
         child: Padding(
@@ -1313,9 +1440,10 @@ class _HorizontalSplitClipper extends CustomClipper<Rect> {
   final double ratio;
 
   @override
-  Rect getClip(Size size) => Rect.fromLTRB(0, 0, size.width * ratio, size.height);
+  Rect getClip(Size size) =>
+      Rect.fromLTRB(0, 0, size.width * ratio, size.height);
 
   @override
-  bool shouldReclip(_HorizontalSplitClipper oldClipper) => oldClipper.ratio != ratio;
+  bool shouldReclip(_HorizontalSplitClipper oldClipper) =>
+      oldClipper.ratio != ratio;
 }
-

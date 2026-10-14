@@ -19,13 +19,27 @@ class _SignaturePadState extends State<SignaturePad> {
   List<Offset> _current = [];
   bool _saving = false;
   String? _error;
-  Color _selectedColor = const Color(0xFF003366); // Default: Executive Formal Blue
+  Color _selectedColor = const Color(
+    0xFF003366,
+  ); // Default: Executive Formal Blue
   double _selectedStrokeWidth = 3.0;
 
   static const _inkColors = [
-    (name: 'Executive Blue', color: Color(0xFF003366), tooltip: 'Formal blue ink (legal standard)'),
-    (name: 'Midnight Black', color: Color(0xFF111111), tooltip: 'Clean executive black ink'),
-    (name: 'Navy Indigo', color: Color(0xFF1E3A8A), tooltip: 'Deep navy fountain pen ink'),
+    (
+      name: 'Executive Blue',
+      color: Color(0xFF003366),
+      tooltip: 'Formal blue ink (legal standard)',
+    ),
+    (
+      name: 'Midnight Black',
+      color: Color(0xFF111111),
+      tooltip: 'Clean executive black ink',
+    ),
+    (
+      name: 'Navy Indigo',
+      color: Color(0xFF1E3A8A),
+      tooltip: 'Deep navy fountain pen ink',
+    ),
   ];
 
   static const _strokeWidths = [
@@ -88,7 +102,9 @@ class _SignaturePadState extends State<SignaturePad> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final padBackground = isDark ? const Color(0xFF222222) : const Color(0xFFFAFAFA);
+    final padBackground = isDark
+        ? const Color(0xFF222222)
+        : const Color(0xFFFAFAFA);
 
     return SafeArea(
       child: Padding(
@@ -105,9 +121,8 @@ class _SignaturePadState extends State<SignaturePad> {
                     children: [
                       Text(
                         'Signature Studio',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       Text(
                         'Draw with your finger or stylus',
@@ -132,9 +147,8 @@ class _SignaturePadState extends State<SignaturePad> {
               children: [
                 Text(
                   'Ink:',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: Theme.of(context).textTheme.labelMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 8),
                 for (final ink in _inkColors)
@@ -168,7 +182,11 @@ class _SignaturePadState extends State<SignaturePad> {
                                 : null,
                           ),
                           child: _selectedColor == ink.color
-                              ? const Icon(Icons.check, size: 16, color: Colors.white)
+                              ? const Icon(
+                                  Icons.check,
+                                  size: 16,
+                                  color: Colors.white,
+                                )
                               : null,
                         ),
                       ),
@@ -180,7 +198,10 @@ class _SignaturePadState extends State<SignaturePad> {
                     for (final s in _strokeWidths)
                       ButtonSegment(
                         value: s.width,
-                        label: Text(s.label, style: const TextStyle(fontSize: 11)),
+                        label: Text(
+                          s.label,
+                          style: const TextStyle(fontSize: 11),
+                        ),
                       ),
                   ],
                   selected: {_selectedStrokeWidth},
@@ -220,8 +241,9 @@ class _SignaturePadState extends State<SignaturePad> {
                     ),
                     onPanStart: (d) =>
                         setState(() => _current = [d.localPosition]),
-                    onPanUpdate: (d) =>
-                        setState(() => _current = [..._current, d.localPosition]),
+                    onPanUpdate: (d) => setState(
+                      () => _current = [..._current, d.localPosition],
+                    ),
                     onPanEnd: (_) => setState(() {
                       if (_current.length > 1) {
                         _strokes = [..._strokes, _current];

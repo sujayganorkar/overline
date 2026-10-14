@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/services.dart';
 
 /// Metadata for a recently opened document.
@@ -184,4 +185,3 @@ class RecentDocumentsStore {
     } catch (_) {}
   }
 }
-

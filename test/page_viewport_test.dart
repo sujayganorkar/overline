@@ -28,7 +28,7 @@ void main() {
   });
 
   group('pageForSwipe', () {
-    test('left and up turn forward; right and down turn backward', () {
+    test('horizontal swipes turn pages; vertical gestures leave the page unchanged', () {
       expect(
         pageForSwipe(
           const Offset(-100, 8),
@@ -54,7 +54,7 @@ void main() {
           pageCount: 5,
           scale: 1,
         ),
-        3,
+        isNull,
       );
       expect(
         pageForSwipe(
@@ -63,7 +63,7 @@ void main() {
           pageCount: 5,
           scale: 1,
         ),
-        1,
+        isNull,
       );
     });
 

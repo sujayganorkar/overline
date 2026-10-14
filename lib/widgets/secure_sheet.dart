@@ -2,6 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'task_catalog.dart';
+import 'task_workspace.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 
@@ -12,8 +15,12 @@ class SecureSheet extends StatefulWidget {
     required this.engine,
     required this.handle,
     required this.onStatusChanged,
+    this.initialAction,
+    this.documentName,
   });
 
+  final String? initialAction;
+  final String? documentName;
   final PdfEngineApi engine;
   final int handle;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
@@ -24,6 +31,29 @@ class SecureSheet extends StatefulWidget {
 
 class _SecureSheetState extends State<SecureSheet> {
   bool _busy = false;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialAction != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startTask();
+      });
+    }
+  }
+
+  Future<void> _startTask() async {
+    if (_busy) return;
+    switch (widget.initialAction) {
+      case 'protect':
+        await _protect();
+      case 'redact':
+        await _redactPhrase();
+      case 'sanitize':
+        await _sanitize();
+      case 'flatten':
+        await _flatten();
+    }
+  }
 
   Future<void> _run(
     String tool,
@@ -291,14 +321,15 @@ class _SecureSheetState extends State<SecureSheet> {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Document sanitized! Metadata removed & layers sealed.'),
+          content: Text(
+            'Document sanitized! Metadata removed & layers sealed.',
+          ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sanitization failed: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Sanitization failed: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -311,6 +342,19 @@ class _SecureSheetState extends State<SecureSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.initialAction != null) {
+      final task = pdfTasks.firstWhere(
+        (task) => task.id == widget.initialAction,
+      );
+      return TaskWorkspace(
+        title: task.title,
+        description: task.description,
+        scope: widget.documentName ?? 'Current PDF',
+        busy: _busy,
+        onStart: _startTask,
+      );
+    }
+
     final theme = Theme.of(context);
     return SafeArea(
       child: SingleChildScrollView(
@@ -334,10 +378,15 @@ class _SecureSheetState extends State<SecureSheet> {
 
               // Hero 1-Tap Privacy Clean Card
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
                 child: Card(
                   elevation: 0,
-                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.25),
+                  color: theme.colorScheme.errorContainer.withValues(
+                    alpha: 0.25,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                     side: BorderSide(
@@ -356,7 +405,9 @@ class _SecureSheetState extends State<SecureSheet> {
                               width: 32,
                               height: 32,
                               decoration: BoxDecoration(
-                                color: theme.colorScheme.error.withValues(alpha: 0.15),
+                                color: theme.colorScheme.error.withValues(
+                                  alpha: 0.15,
+                                ),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -386,7 +437,10 @@ class _SecureSheetState extends State<SecureSheet> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.tonalIcon(
-                            icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                            icon: const Icon(
+                              Icons.cleaning_services_outlined,
+                              size: 18,
+                            ),
                             label: const Text('Sanitize document now'),
                             onPressed: _busy ? null : _oneTapSanitize,
                           ),

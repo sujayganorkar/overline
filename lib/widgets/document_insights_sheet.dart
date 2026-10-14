@@ -207,7 +207,8 @@ class _DocumentInsightsSheetState extends State<DocumentInsightsSheet> {
 
   Widget _buildMinimizedStepper(BuildContext context) {
     final theme = Theme.of(context);
-    final current = (_results.isNotEmpty && _activeCitationIndex < _results.length)
+    final current =
+        (_results.isNotEmpty && _activeCitationIndex < _results.length)
         ? _results[_activeCitationIndex]
         : null;
 
@@ -258,7 +259,9 @@ class _DocumentInsightsSheetState extends State<DocumentInsightsSheet> {
                   onPressed: _activeCitationIndex > 0
                       ? () {
                           setState(() => _activeCitationIndex--);
-                          widget.onJumpToPage(_results[_activeCitationIndex].page);
+                          widget.onJumpToPage(
+                            _results[_activeCitationIndex].page,
+                          );
                         }
                       : null,
                 ),
@@ -268,7 +271,9 @@ class _DocumentInsightsSheetState extends State<DocumentInsightsSheet> {
                   onPressed: _activeCitationIndex < _results.length - 1
                       ? () {
                           setState(() => _activeCitationIndex++);
-                          widget.onJumpToPage(_results[_activeCitationIndex].page);
+                          widget.onJumpToPage(
+                            _results[_activeCitationIndex].page,
+                          );
                         }
                       : null,
                 ),
@@ -353,7 +358,9 @@ class _DocumentInsightsSheetState extends State<DocumentInsightsSheet> {
                           children: [
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: _loading ? null : _answerFromEvidence,
+                                onPressed: _loading
+                                    ? null
+                                    : _answerFromEvidence,
                                 icon: const Icon(Icons.find_in_page_outlined),
                                 label: const Text('Find evidence'),
                               ),

@@ -108,9 +108,7 @@ class _FindBarState extends State<FindBar> {
                 if (rawRects is List) {
                   for (final r in rawRects) {
                     if (r is List && r.length == 4) {
-                      rects.add([
-                        for (final v in r) (v as num).toDouble(),
-                      ]);
+                      rects.add([for (final v in r) (v as num).toDouble()]);
                     }
                   }
                 }
@@ -172,8 +170,8 @@ class _FindBarState extends State<FindBar> {
     final label = (widget.matchCount != null)
         ? '${effectiveIndex + 1} of $totalCount'
         : _matches.isEmpty
-            ? (_error ?? 'Find in document')
-            : '${effectiveIndex + 1} of $totalCount${_complete ? '' : '+'}';
+        ? (_error ?? 'Find in document')
+        : '${effectiveIndex + 1} of $totalCount${_complete ? '' : '+'}';
     final hasMatches = widget.matchCount != null
         ? widget.matchCount! > 0
         : _matches.isNotEmpty;

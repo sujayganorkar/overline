@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
 import '../services/pdf_engine.dart';
@@ -77,6 +76,9 @@ String mimeTypeFor(String path) {
     'tif' || 'tiff' => 'image/tiff',
     'html' => 'text/html',
     'txt' => 'text/plain',
+    'docx' =>
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'rtf' => 'application/rtf',
     'fdf' || 'xfdf' => 'application/vnd.adobe.xfdf',
     _ => 'application/octet-stream',
   };
@@ -123,11 +125,11 @@ Future<void> saveOutputPaths(
       if (!context.mounted) return;
       await DeliveryHubSheet.show(
         context,
-        title: 'Document Ready',
+        title: 'Your file is ready',
         subtitle: name,
         bytes: bytes,
         suggestedFileName: name.isEmpty ? 'output.pdf' : name,
-        badgeText: 'EXPORTED',
+
         onOpenInReader: onOpenInReader,
         onOpenDocument: onOpenDocument,
       );

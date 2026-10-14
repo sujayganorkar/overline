@@ -17,7 +17,7 @@ import 'widgets/agent_command_sheet.dart';
 import 'widgets/annotation_geometry.dart' as annotation_geo;
 import 'widgets/bookmarks_screen.dart';
 import 'widgets/comments_screen.dart';
-import 'widgets/document_heading.dart';
+import 'widgets/task_catalog.dart';
 import 'widgets/document_insights_sheet.dart';
 import 'widgets/export_sheet.dart';
 import 'widgets/links_screen.dart';
@@ -51,7 +51,31 @@ class PdfCraftApp extends StatelessWidget {
       title: 'PdfCraft Mobile',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFB42332),
+          primary: const Color(0xFFB42332),
+          surface: const Color(0xFFFAFBFC),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFFAFBFC),
+        appBarTheme: const AppBarTheme(
+          centerTitle: false,
+          scrolledUnderElevation: 0,
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          border: OutlineInputBorder(),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
+        iconButtonTheme: IconButtonThemeData(
+          style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
         useMaterial3: true,
       ),
       home: ViewerPage(engineFactory: engineFactory),
@@ -59,12 +83,7 @@ class PdfCraftApp extends StatelessWidget {
   }
 }
 
-enum WorkflowOutcome {
-  completed,
-  cancelled,
-  failed,
-  needsInput,
-}
+enum WorkflowOutcome { completed, cancelled, failed, needsInput }
 
 class ViewerPage extends StatefulWidget {
   const ViewerPage({super.key, required this.engineFactory});
@@ -103,7 +122,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   String _textSelectionColor = 'yellow';
   bool _recoveredUnsaved = false;
   bool _recoveryAvailable = false;
-  int _activeSurface = 0;
+  bool _launchingTask = false;
+  Offset? _doubleTapPosition;
+  bool _swipeStartedAtFit = false;
   static bool _coachShown = false;
   final TransformationController _viewerTransform = TransformationController();
   final GlobalKey _viewerPageKey = GlobalKey();
@@ -157,15 +178,18 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       }
     });
 
-    channel.invokeMethod<Map<Object?, Object?>>('getInitialPdf').then((pdf) {
-      if (pdf != null) {
-        final name = pdf['name'] as String?;
-        final path = pdf['path'] as String?;
-        if (name != null && path != null) {
-          _openIncomingPdf(name, path);
-        }
-      }
-    }).catchError((_) {});
+    channel
+        .invokeMethod<Map<Object?, Object?>>('getInitialPdf')
+        .then((pdf) {
+          if (pdf != null) {
+            final name = pdf['name'] as String?;
+            final path = pdf['path'] as String?;
+            if (name != null && path != null) {
+              _openIncomingPdf(name, path);
+            }
+          }
+        })
+        .catchError((_) {});
   }
 
   Future<void> _openIncomingPdf(String name, String filePath) async {
@@ -223,11 +247,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       await _render();
       unawaited(
         _recentStore
-            .recordOpened(
-              name: name,
-              pageCount: count,
-              bytes: bytes,
-            )
+            .recordOpened(name: name, pageCount: count, bytes: bytes)
             .then((_) => _loadRecents()),
       );
     } catch (e) {
@@ -290,7 +310,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Unsaved changes'),
-        content: const Text('Save this PDF before opening another document?'),
+        content: const Text('Save this PDF before leaving the document?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, 'cancel'),
@@ -508,6 +528,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _goto(int page) async {
+    if (_busy) return;
     if (page < 1 || page > _pageCount || page == _page) return;
     _page = page;
     _textSelectionAnchor = null;
@@ -559,7 +580,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   void _onViewerPointerDown(PointerDownEvent event) {
     _viewerPointerCount++;
-    if (_viewerPointerCount == 1) _viewerLongPressSelecting = false;
+    if (_viewerPointerCount == 1) {
+      _viewerLongPressSelecting = false;
+      _swipeStartedAtFit = _viewerTransform.value.getMaxScaleOnAxis() <= 1.05;
+    } else {
+      _swipeStartedAtFit = false;
+    }
     _viewerSwipeStart = _viewerPointerCount == 1 ? event.position : null;
   }
 
@@ -569,6 +595,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     final start = _viewerSwipeStart;
     _viewerSwipeStart = null;
     if (start == null ||
+        !_swipeStartedAtFit ||
         _busy ||
         _doc == null ||
         _viewerLongPressSelecting ||
@@ -587,6 +614,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   }
 
   void _beginTextSelection(Offset pageLocalPosition, double fitScale) {
+    if (_busy || _viewerPointerCount > 1) return;
     _viewerLongPressSelecting = true;
     if (_pageTextLoading) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1793,7 +1821,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<WorkflowOutcome> _openSecure() async {
+  Future<WorkflowOutcome> _openSecure({String? initialAction}) async {
     final engine = _engine;
     final doc = _doc;
     if (engine == null || doc == null) return WorkflowOutcome.failed;
@@ -1803,6 +1831,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (context) => SecureSheet(
+        documentName: _name,
+        initialAction: initialAction,
         engine: engine,
         handle: doc,
         onStatusChanged: (status) {
@@ -1811,19 +1841,27 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         },
       ),
     );
-    return statusChanged ? WorkflowOutcome.completed : WorkflowOutcome.cancelled;
+    return statusChanged
+        ? WorkflowOutcome.completed
+        : WorkflowOutcome.cancelled;
   }
 
-  Future<WorkflowOutcome> _openOrganize() async {
+  Future<WorkflowOutcome> _openOrganize({String? initialAction}) async {
     final engine = _engine;
     final doc = _doc;
     if (engine == null) return WorkflowOutcome.failed;
     var statusChanged = false;
+    ({Uint8List bytes, String name})? output;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => OrganizeSheet(
+      builder: (sheetContext) => OrganizeSheet(
+        initialAction: initialAction,
+        onOpenDocument: (bytes, name) {
+          output = (bytes: bytes, name: name);
+          Navigator.pop(sheetContext);
+        },
         engine: engine,
         handle: doc ?? 0,
         pageCount: _pageCount,
@@ -1836,10 +1874,15 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         },
       ),
     );
-    return statusChanged ? WorkflowOutcome.completed : WorkflowOutcome.cancelled;
+    if (output != null && mounted) {
+      await _openDocumentBytes(output!.name, output!.bytes);
+    }
+    return statusChanged
+        ? WorkflowOutcome.completed
+        : WorkflowOutcome.cancelled;
   }
 
-  Future<WorkflowOutcome> _openExport() async {
+  Future<WorkflowOutcome> _openExport({String? initialAction}) async {
     final engine = _engine;
     final doc = _doc;
     if (engine == null || doc == null) return WorkflowOutcome.failed;
@@ -1849,6 +1892,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (context) => ExportSheet(
+        documentName: _name,
+        initialAction: initialAction,
         engine: engine,
         handle: doc,
         page: _page,
@@ -1859,7 +1904,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         },
       ),
     );
-    return statusChanged ? WorkflowOutcome.completed : WorkflowOutcome.cancelled;
+    return statusChanged
+        ? WorkflowOutcome.completed
+        : WorkflowOutcome.cancelled;
   }
 
   Future<void> _openTextEdit() async {
@@ -1915,237 +1962,168 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<String?> _chooseSurfaceAction(
-    String title,
-    List<({String id, String label, String detail, IconData icon})> actions,
-  ) => showModalBottomSheet<String>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            if (actions.length > 2)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final action in actions.take(3))
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ActionChip(
-                            avatar: Icon(action.icon, size: 18),
-                            label: Text(action.label),
-                            onPressed: () => Navigator.pop(context, action.id),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                physics: const ClampingScrollPhysics(),
-                children: [
-                  for (final action in actions)
-                    ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                      leading: CircleAvatar(
-                        radius: 20,
-                        backgroundColor: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                        child: Icon(
-                          action.icon,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      title: Text(
-                        action.label,
-                        style: const TextStyle(fontWeight: FontWeight.w500),
-                      ),
-                      subtitle: Text(action.detail),
-                      onTap: () => Navigator.pop(context, action.id),
-                    ),
-                ],
-              ),
-            ),
-          ],
+  Future<void> _showTools() async {
+    if (_busy || _launchingTask || _engine == null) return;
+    final task = await showModalBottomSheet<PdfTask>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: FractionallySizedBox(
+          heightFactor: 0.92,
+          child: TaskCatalog(
+            onSelected: (task) => Navigator.pop(context, task),
+          ),
         ),
       ),
-    ),
-  );
+    );
+    if (task != null && mounted) await _launchTask(task);
+  }
 
-  Future<void> _openSurface(int index) async {
-    if (_busy) return;
-    setState(() => _activeSurface = index);
-    if (index == 3) {
-      await _openAgentCommand();
+  Future<void> _launchTask(PdfTask task) async {
+    if (_busy || _launchingTask || _engine == null) return;
+    setState(() => _launchingTask = true);
+    try {
+      if (task.needsDocument && _doc == null) {
+        await _open();
+        if (!mounted || _doc == null) return;
+      }
+      if (!mounted) return;
+      switch (task.id) {
+        case 'blank':
+          await _newBlankPdf();
+        case 'find':
+          setState(() => _finding = true);
+        case 'bookmarks':
+          await _openBookmarks();
+        case 'comments':
+          await _openComments();
+        case 'insights':
+          await _openInsights();
+        case 'links':
+          await _openLinks();
+        case 'draw':
+          await _openAnnotate();
+        case 'selectText':
+          await _openAnnotate(initialMode: AnnotateMode.select);
+        case 'highlight':
+          await _highlightPhrase();
+        case 'forms':
+          await _openForms();
+        case 'sign':
+          await _openSignature();
+        case 'text':
+          await _openTextEdit();
+        case 'pages':
+          await _openPages();
+        case 'agent':
+          await _openAgentCommand();
+        case 'secure':
+          await _openSecure();
+        case 'protect':
+        case 'redact':
+        case 'sanitize':
+        case 'flatten':
+          await _openSecure(initialAction: task.id);
+        case 'combine':
+        case 'images':
+        case 'split':
+        case 'extract':
+        case 'labels':
+        case 'headerFooter':
+        case 'watermark':
+        case 'background':
+        case 'removeMarks':
+          await _openOrganize(initialAction: task.id);
+        default:
+          await _openExport(initialAction: task.id);
+      }
+    } finally {
+      if (mounted) setState(() => _launchingTask = false);
+    }
+  }
+
+  Future<void> _goHome() async {
+    if (_busy || _launchingTask) return;
+    if (_finding) {
+      setState(() => _finding = false);
       return;
     }
-    final actions = switch (index) {
-      0 => <({String id, String label, String detail, IconData icon})>[
-        (
-          id: 'find',
-          label: 'Find in PDF',
-          detail: 'Search and step through matches',
-          icon: Icons.search,
+    if (_textSelectionAnchor != null) {
+      setState(() {
+        _textSelectionAnchor = null;
+        _textSelectionExtent = null;
+      });
+      return;
+    }
+    if (!await _confirmReplacingCurrent() || !mounted) return;
+    final doc = _doc;
+    if (doc != null) await _engine!.close(handle: doc);
+    if (!mounted) return;
+    setState(() {
+      _doc = null;
+      _png = null;
+      _name = null;
+      _page = 1;
+      _pageCount = 0;
+      _dirty = false;
+      _undoLabel = null;
+      _redoLabel = null;
+      _markers = [];
+      _status = 'Choose a task or open a PDF';
+    });
+  }
+
+  Future<void> _finishDocument() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Save & share',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              Text(_name ?? 'Current PDF'),
+              const SizedBox(height: 8),
+              Text(
+                _dirty
+                    ? 'Your changes are ready to save. Sharing sends a copy; it does not save your working document.'
+                    : 'Save another copy or share this PDF.',
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(context, 'save'),
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Save PDF'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(context, 'share'),
+                icon: const Icon(Icons.share_outlined),
+                label: const Text('Share a copy'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Keep editing'),
+              ),
+            ],
+          ),
         ),
-        (
-          id: 'bookmarks',
-          label: 'Bookmarks',
-          detail: 'Jump to saved sections',
-          icon: Icons.bookmark_outline,
-        ),
-        (
-          id: 'comments',
-          label: 'Comments',
-          detail: 'Review notes and threads',
-          icon: Icons.comment_outlined,
-        ),
-        (
-          id: 'insights',
-          label: 'Summary & evidence',
-          detail: 'Find sourced excerpts or get an extractive summary',
-          icon: Icons.summarize_outlined,
-        ),
-        (
-          id: 'links',
-          label: 'Links',
-          detail: 'Open or remove links in this document',
-          icon: Icons.link_outlined,
-        ),
-      ],
-      1 => <({String id, String label, String detail, IconData icon})>[
-        (
-          id: 'draw',
-          label: 'Draw & annotate',
-          detail: 'Write, mark, and point directly on the page',
-          icon: Icons.brush_outlined,
-        ),
-        (
-          id: 'selectText',
-          label: 'Select text to mark',
-          detail: 'Drag across text; PdfCraft snaps the preview to full lines',
-          icon: Icons.select_all,
-        ),
-        (
-          id: 'highlight',
-          label: 'Highlight text',
-          detail: 'Find a phrase and preview all matches',
-          icon: Icons.highlight_outlined,
-        ),
-        (
-          id: 'sign',
-          label: 'Sign & date',
-          detail: 'Type, draw, checkmarks, or place today’s date',
-          icon: Icons.draw_outlined,
-        ),
-        (
-          id: 'forms',
-          label: 'Fill form',
-          detail: 'Use full-width controls instead of tiny PDF fields',
-          icon: Icons.ballot_outlined,
-        ),
-        (
-          id: 'pages',
-          label: 'Pages',
-          detail: 'Preview, reorder, rotate, duplicate, or delete',
-          icon: Icons.grid_view_outlined,
-        ),
-        (
-          id: 'text',
-          label: 'Edit existing text',
-          detail: 'Tap a paragraph, review, then replace',
-          icon: Icons.edit_outlined,
-        ),
-      ],
-      _ => <({String id, String label, String detail, IconData icon})>[
-        (
-          id: 'files',
-          label: 'Create, combine & split',
-          detail: 'Images to PDF, merge, extract, split',
-          icon: Icons.merge_outlined,
-        ),
-        (
-          id: 'export',
-          label: 'Export & compress',
-          detail: 'Convert, compare, OCR, reach a target size',
-          icon: Icons.output_outlined,
-        ),
-        (
-          id: 'secure',
-          label: 'Protect & redact',
-          detail: 'Mark, inspect, apply, or add passwords',
-          icon: Icons.lock_outline,
-        ),
-      ],
-    };
-    final action = await _chooseSurfaceAction(
-      const ['Read', 'Edit', 'Organize'][index],
-      actions,
+      ),
     );
     if (!mounted) return;
-    switch (action) {
-      case 'find':
-        setState(() => _finding = true);
-      case 'bookmarks':
-        await _openBookmarks();
-      case 'comments':
-        await _openComments();
-      case 'insights':
-        await _openInsights();
-      case 'links':
-        await _openLinks();
-      case 'draw':
-        await _openAnnotate();
-      case 'selectText':
-        await _openAnnotate(initialMode: AnnotateMode.select);
-      case 'highlight':
-        await _highlightPhrase();
-      case 'forms':
-        await _openForms();
-      case 'sign':
-        await _openSignature();
-      case 'text':
-        await _openTextEdit();
-      case 'pages':
-        await _openPages();
-      case 'files':
-        await _openOrganize();
-      case 'export':
-        await _openExport();
-      case 'secure':
-        await _openSecure();
-    }
+    if (action == 'save') await _save();
+    if (action == 'share') await _shareCurrentPdf();
   }
 
   Future<void> _openAgentCommand() async {
@@ -2171,9 +2149,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       case 'compare':
       case 'export':
       case 'ocr':
-        outcome = await _openExport();
+        outcome = await _openExport(
+          initialAction: request == 'export' ? 'office' : request,
+        );
       case 'combine':
-        outcome = await _openOrganize();
+        outcome = await _openOrganize(initialAction: 'combine');
       case 'pages':
         outcome = await _openPages();
       case 'forms':
@@ -2195,7 +2175,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       );
     } else if (outcome == WorkflowOutcome.failed) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not complete ${_agentTaskLabel(request)}.')),
+        SnackBar(
+          content: Text('Could not complete ${_agentTaskLabel(request)}.'),
+        ),
       );
     }
   }
@@ -2258,507 +2240,460 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         : (math.max(_textSelectionAnchor!, _textSelectionExtent!) -
               math.min(_textSelectionAnchor!, _textSelectionExtent!) +
               1);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('PdfCraft Mobile'),
-        actions: [
-          if (_doc != null)
-            IconButton(
-              onPressed: _busy || _undoLabel == null ? null : _undo,
-              icon: const Icon(Icons.undo),
-              tooltip: _undoLabel == null
-                  ? 'Nothing to undo'
-                  : 'Undo $_undoLabel',
-            ),
-          if (_doc != null)
-            IconButton(
-              onPressed: _busy || _redoLabel == null ? null : _redo,
-              icon: const Icon(Icons.redo),
-              tooltip: _redoLabel == null
-                  ? 'Nothing to redo'
-                  : 'Redo $_redoLabel',
-            ),
-          if (_doc != null)
-            IconButton(
-              onPressed: _busy ? null : () => setState(() => _finding = true),
-              icon: const Icon(Icons.search),
-              tooltip: 'Find in document',
-            ),
-          if (_doc != null)
-            IconButton(
-              onPressed: _busy ? null : _openAgentCommand,
-              icon: const Icon(Icons.auto_awesome),
-              tooltip: 'Ask PdfCraft',
-            ),
-          if (_doc != null)
-            IconButton(
-              onPressed: _busy ? null : _save,
-              icon: const Icon(Icons.save),
-              tooltip: 'Save (engine incremental save)',
-            ),
-          if (_doc != null)
-            IconButton(
-              onPressed: _busy ? null : _shareCurrentPdf,
-              icon: const Icon(Icons.share_outlined),
-              tooltip: 'Share a copy of this PDF',
-            ),
-          IconButton(
-            onPressed: _busy ? null : _open,
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'Open PDF',
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          _name == null
-                              ? _status
-                              : documentHeading(_name!, _pageCount),
-                          style: Theme.of(context).textTheme.titleSmall,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (_doc != null) ...[
-                        const SizedBox(width: 8),
-                        Semantics(
-                          label: _dirty
-                              ? 'Unsaved changes${_recoveryAvailable ? ', recovery checkpoint saved' : ''}'
-                              : 'All changes saved',
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _dirty
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .errorContainer
-                                      .withValues(alpha: 0.7)
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .secondaryContainer
-                                      .withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: _dirty
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .error
-                                        .withValues(alpha: 0.4)
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .secondary
-                                        .withValues(alpha: 0.3),
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _dirty
-                                      ? Icons.edit_note
-                                      : Icons.check_circle_outline,
-                                  size: 14,
-                                  color: _dirty
-                                      ? Theme.of(context).colorScheme.error
-                                      : Theme.of(context)
-                                          .colorScheme
-                                          .secondary,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _dirty
-                                      ? 'Unsaved${_recoveryAvailable ? ' · recovery' : ''}'
-                                      : 'Saved',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelSmall
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        color: _dirty
-                                            ? Theme.of(context)
-                                                .colorScheme
-                                                .error
-                                            : Theme.of(context)
-                                                .colorScheme
-                                                .secondary,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+    return PopScope(
+      canPop: _doc == null && !_busy && !_launchingTask,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _goHome();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: _doc == null
+              ? null
+              : IconButton(
+                  onPressed: _busy ? null : _goHome,
+                  tooltip: 'Close document',
+                  icon: const Icon(Icons.arrow_back),
                 ),
-                if (_busy)
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-              ],
-            ),
+          title: Text(
+            _name ?? 'PdfCraft Mobile',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: _png == null
-                ? _doc == null
-                      ? _emptyDocumentHome()
-                      : Center(child: Text(_status))
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final sourceWidth = _imageWidthPx ?? 1;
-                      final sourceHeight = _imageHeightPx ?? 1;
-                      final fitScale = fitPageScale(
-                        viewportWidth: constraints.maxWidth,
-                        viewportHeight: constraints.maxHeight,
-                        pageWidth: sourceWidth,
-                        pageHeight: sourceHeight,
-                      );
-                      final pageWidth = sourceWidth * fitScale;
-                      final pageHeight = sourceHeight * fitScale;
-                      final selectionStart =
-                          _textSelectionAnchor == null ||
-                              _textSelectionExtent == null
-                          ? null
-                          : math.min(
-                              _textSelectionAnchor!,
-                              _textSelectionExtent!,
-                            );
-                      final selectionEnd =
-                          _textSelectionAnchor == null ||
-                              _textSelectionExtent == null
-                          ? null
-                          : math.max(
-                              _textSelectionAnchor!,
-                              _textSelectionExtent!,
-                            );
+          actions: [
+            if (_doc != null) ...[
+              IconButton(
+                onPressed: _busy || _undoLabel == null ? null : _undo,
+                icon: const Icon(Icons.undo),
+                tooltip: _undoLabel == null
+                    ? 'Nothing to undo'
+                    : 'Undo $_undoLabel',
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Document options',
+                enabled: !_busy,
+                onSelected: (value) {
+                  switch (value) {
+                    case 'redo':
+                      _redo();
+                    case 'find':
+                      setState(() => _finding = true);
+                    case 'open':
+                      _open();
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'redo',
+                    enabled: _redoLabel != null,
+                    child: Text(
+                      _redoLabel == null
+                          ? 'Nothing to redo'
+                          : 'Redo $_redoLabel',
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'find',
+                    child: Text('Find in PDF'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'open',
+                    child: Text('Open another PDF'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_doc != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _dirty
+                            ? 'Unsaved changes${_recoveryAvailable ? ' • recovery available' : ''}'
+                            : 'No unsaved changes',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    Text(
+                      '$_pageCount ${_pageCount == 1 ? 'page' : 'pages'}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            if (_busy) const LinearProgressIndicator(),
+            Expanded(
+              child: _png == null
+                  ? _doc == null
+                        ? _emptyDocumentHome()
+                        : Center(child: Text(_status))
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final sourceWidth = _imageWidthPx ?? 1;
+                        final sourceHeight = _imageHeightPx ?? 1;
+                        final fitScale = fitPageScale(
+                          viewportWidth: constraints.maxWidth,
+                          viewportHeight: constraints.maxHeight,
+                          pageWidth: sourceWidth,
+                          pageHeight: sourceHeight,
+                        );
+                        final pageWidth = sourceWidth * fitScale;
+                        final pageHeight = sourceHeight * fitScale;
+                        final selectionStart =
+                            _textSelectionAnchor == null ||
+                                _textSelectionExtent == null
+                            ? null
+                            : math.min(
+                                _textSelectionAnchor!,
+                                _textSelectionExtent!,
+                              );
+                        final selectionEnd =
+                            _textSelectionAnchor == null ||
+                                _textSelectionExtent == null
+                            ? null
+                            : math.max(
+                                _textSelectionAnchor!,
+                                _textSelectionExtent!,
+                              );
 
-                      Widget selectionHandle(int index, bool anchor) {
-                        final rect = _pageTextLines[index].rect;
-                        final x =
-                            (anchor ? rect[0] : rect[2]) *
-                            96 /
-                            72 *
-                            fitScale;
-                        final y = rect[3] * 96 / 72 * fitScale;
-                        final currentScale =
-                            _viewerTransform.value.getMaxScaleOnAxis();
-                        final invScale =
-                            (1.0 / (currentScale > 0.05 ? currentScale : 1.0))
-                                .clamp(0.25, 1.0);
-                        final handleSize = 48.0 * invScale;
-                        final dotSize = 18.0 * invScale;
-                        final borderWidth = 2.0 * invScale;
-                        final halfHandle = handleSize / 2;
-                        return Positioned(
-                          left: x - halfHandle,
-                          top: y - halfHandle,
-                          child: Semantics(
-                            label: anchor
-                                ? 'Start text selection handle, line ${index + 1}'
-                                : 'End text selection handle, line ${index + 1}',
-                            slider: true,
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onPanStart: (_) {
-                                _viewerLongPressSelecting = true;
-                                HapticFeedback.selectionClick();
-                              },
-                              onPanUpdate: (details) =>
-                                  _moveTextSelectionHandle(
-                                    details,
-                                    fitScale,
-                                    anchor: anchor,
-                                  ),
-                              onPanEnd: (_) =>
-                                  _viewerLongPressSelecting = false,
-                              child: SizedBox(
-                                width: handleSize,
-                                height: handleSize,
-                                child: Center(
-                                  child: Container(
-                                    width: dotSize,
-                                    height: dotSize,
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: Colors.white,
-                                        width: borderWidth,
-                                      ),
-                                      boxShadow: const [
-                                        BoxShadow(
-                                          color: Colors.black26,
-                                          blurRadius: 3,
-                                          offset: Offset(0, 1),
+                        Widget selectionHandle(int index, bool anchor) {
+                          final rect = _pageTextLines[index].rect;
+                          final x =
+                              (anchor ? rect[0] : rect[2]) * 96 / 72 * fitScale;
+                          final y = rect[3] * 96 / 72 * fitScale;
+                          final currentScale = _viewerTransform.value
+                              .getMaxScaleOnAxis();
+                          final invScale =
+                              (1.0 / (currentScale > 0.05 ? currentScale : 1.0))
+                                  .clamp(0.25, 1.0);
+                          final handleSize = 48.0 * invScale;
+                          final dotSize = 18.0 * invScale;
+                          final borderWidth = 2.0 * invScale;
+                          final halfHandle = handleSize / 2;
+                          return Positioned(
+                            left: x - halfHandle,
+                            top: y - halfHandle,
+                            child: Semantics(
+                              label: anchor
+                                  ? 'Start text selection handle, line ${index + 1}'
+                                  : 'End text selection handle, line ${index + 1}',
+                              slider: true,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onPanStart: (_) {
+                                  _viewerLongPressSelecting = true;
+                                  HapticFeedback.selectionClick();
+                                },
+                                onPanUpdate: (details) =>
+                                    _moveTextSelectionHandle(
+                                      details,
+                                      fitScale,
+                                      anchor: anchor,
+                                    ),
+                                onPanEnd: (_) =>
+                                    _viewerLongPressSelecting = false,
+                                child: SizedBox(
+                                  width: handleSize,
+                                  height: handleSize,
+                                  child: Center(
+                                    child: Container(
+                                      width: dotSize,
+                                      height: dotSize,
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: borderWidth,
                                         ),
-                                      ],
+                                        boxShadow: const [
+                                          BoxShadow(
+                                            color: Colors.black26,
+                                            blurRadius: 3,
+                                            offset: Offset(0, 1),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      }
+                          );
+                        }
 
-                      return Stack(
-                        fit: StackFit.expand,
-                        clipBehavior: Clip.none,
-                        children: [
-                          // Base layer: Interactive viewer with PDF canvas
-                          Listener(
-                            behavior: HitTestBehavior.opaque,
-                            onPointerDown: _onViewerPointerDown,
-                            onPointerUp: _onViewerPointerUp,
-                            onPointerCancel: _onViewerPointerCancel,
-                            child: InteractiveViewer(
-                              transformationController: _viewerTransform,
-                              minScale: 1,
-                              maxScale: 8,
-                              boundaryMargin: const EdgeInsets.symmetric(
-                                horizontal: 48,
-                                vertical: 48,
-                              ),
-                              clipBehavior: Clip.none,
-                              child: Center(
-                                child: SizedBox(
-                                  width: pageWidth,
-                                  height: pageHeight,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onDoubleTapDown: (details) {
-                                      final currentScale =
-                                          _viewerTransform.value
-                                              .getMaxScaleOnAxis();
-                                      if (currentScale > 1.05) {
-                                        _viewerTransform.value =
-                                            Matrix4.identity();
-                                      } else {
-                                        const targetScale = 2.5;
-                                        final focal = details.localPosition;
-                                        final pageOriginX =
-                                            (constraints.maxWidth - pageWidth) /
-                                                2;
-                                        final pageOriginY =
-                                            (constraints.maxHeight -
-                                                    pageHeight) /
-                                                2;
-                                        final cx = pageOriginX + focal.dx;
-                                        final cy = pageOriginY + focal.dy;
-                                        final rawDx =
-                                            (constraints.maxWidth / 2) -
-                                                (cx * targetScale);
-                                        final rawDy =
-                                            (constraints.maxHeight / 2) -
-                                                (cy * targetScale);
-                                        final minDx =
-                                            constraints.maxWidth *
-                                                (1 - targetScale);
-                                        final minDy =
-                                            constraints.maxHeight *
-                                                (1 - targetScale);
-                                        final clampedDx =
-                                            rawDx.clamp(minDx, 0.0);
-                                        final clampedDy =
-                                            rawDy.clamp(minDy, 0.0);
-                                        _viewerTransform.value =
-                                            Matrix4.identity()
-                                              ..translate(clampedDx, clampedDy)
-                                              ..scale(targetScale, targetScale);
-                                      }
-                                    },
-                                    onDoubleTap: () {},
-                                        onLongPressStart: (details) =>
-                                            _beginTextSelection(
+                        return Stack(
+                          fit: StackFit.expand,
+                          clipBehavior: Clip.none,
+                          children: [
+                            // Base layer: Interactive viewer with PDF canvas
+                            Listener(
+                              behavior: HitTestBehavior.opaque,
+                              onPointerDown: _onViewerPointerDown,
+                              onPointerUp: _onViewerPointerUp,
+                              onPointerCancel: _onViewerPointerCancel,
+                              child: InteractiveViewer(
+                                transformationController: _viewerTransform,
+                                onInteractionUpdate: (_) {
+                                  if (_viewerTransform.value
+                                          .getMaxScaleOnAxis() >
+                                      1.05) {
+                                    _swipeStartedAtFit = false;
+                                  }
+                                },
+                                minScale: 1,
+                                maxScale: 8,
+                                boundaryMargin: const EdgeInsets.symmetric(
+                                  horizontal: 48,
+                                  vertical: 48,
+                                ),
+                                clipBehavior: Clip.hardEdge,
+                                child: Center(
+                                  child: SizedBox(
+                                    width: pageWidth,
+                                    height: pageHeight,
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onDoubleTapDown: (details) =>
+                                          _doubleTapPosition =
                                               details.localPosition,
-                                              fitScale,
+                                      onDoubleTap: () {
+                                        if (_busy ||
+                                            _doubleTapPosition == null) {
+                                          return;
+                                        }
+                                        final currentScale = _viewerTransform
+                                            .value
+                                            .getMaxScaleOnAxis();
+                                        if (currentScale > 1.05) {
+                                          _viewerTransform.value =
+                                              Matrix4.identity();
+                                        } else {
+                                          const targetScale = 2.5;
+                                          final focal = _doubleTapPosition!;
+                                          final pageOriginX =
+                                              (constraints.maxWidth -
+                                                  pageWidth) /
+                                              2;
+                                          final pageOriginY =
+                                              (constraints.maxHeight -
+                                                  pageHeight) /
+                                              2;
+                                          final cx = pageOriginX + focal.dx;
+                                          final cy = pageOriginY + focal.dy;
+                                          final rawDx =
+                                              (constraints.maxWidth / 2) -
+                                              (cx * targetScale);
+                                          final rawDy =
+                                              (constraints.maxHeight / 2) -
+                                              (cy * targetScale);
+                                          final minDx =
+                                              constraints.maxWidth *
+                                              (1 - targetScale);
+                                          final minDy =
+                                              constraints.maxHeight *
+                                              (1 - targetScale);
+                                          final clampedDx = rawDx.clamp(
+                                            minDx,
+                                            0.0,
+                                          );
+                                          final clampedDy = rawDy.clamp(
+                                            minDy,
+                                            0.0,
+                                          );
+                                          _viewerTransform.value =
+                                              Matrix4.identity()
+                                                ..translateByDouble(
+                                                  clampedDx,
+                                                  clampedDy,
+                                                  0,
+                                                  1,
+                                                )
+                                                ..scaleByDouble(
+                                                  targetScale,
+                                                  targetScale,
+                                                  1,
+                                                  1,
+                                                );
+                                        }
+                                      },
+                                      onLongPressStart: (details) =>
+                                          _beginTextSelection(
+                                            details.localPosition,
+                                            fitScale,
+                                          ),
+                                      onLongPressMoveUpdate: (details) =>
+                                          _extendTextSelection(
+                                            details.localPosition,
+                                            fitScale,
+                                          ),
+                                      onLongPressEnd: (_) =>
+                                          _viewerLongPressSelecting = false,
+                                      child: Stack(
+                                        key: _viewerPageKey,
+                                        fit: StackFit.expand,
+                                        children: [
+                                          Semantics(
+                                            image: true,
+                                            label:
+                                                'Document page $_page of $_pageCount',
+                                            child: Image.memory(
+                                              _png!,
+                                              fit: BoxFit.fill,
+                                              gaplessPlayback: true,
                                             ),
-                                        onLongPressMoveUpdate: (details) =>
-                                            _extendTextSelection(
-                                              details.localPosition,
-                                              fitScale,
-                                            ),
-                                        onLongPressEnd: (_) =>
-                                            _viewerLongPressSelecting = false,
-                                        child: Stack(
-                                          key: _viewerPageKey,
-                                          fit: StackFit.expand,
-                                          children: [
-                                            Semantics(
-                                              image: true,
-                                              label:
-                                                  'Document page $_page of $_pageCount',
-                                              child: Image.memory(
-                                                _png!,
-                                                fit: BoxFit.fill,
-                                                gaplessPlayback: true,
-                                              ),
-                                            ),
-                                            if (_finding &&
-                                                _findMatches.isNotEmpty)
-                                              for (
-                                                var matchIdx = 0;
-                                                matchIdx <
-                                                    _findMatches.length;
-                                                matchIdx++
-                                              )
-                                                if (_findMatches[matchIdx]
-                                                        .page ==
-                                                    _page)
-                                                  for (final rect
-                                                      in _findMatches[matchIdx]
-                                                          .rects)
-                                                    if (rect.length == 4)
-                                                      Positioned(
-                                                        left:
-                                                            math.min(
-                                                              rect[0],
-                                                              rect[2],
-                                                            ) *
-                                                            96 /
-                                                            72 *
-                                                            fitScale,
-                                                        top:
-                                                            math.min(
-                                                              rect[1],
-                                                              rect[3],
-                                                            ) *
-                                                            96 /
-                                                            72 *
-                                                            fitScale,
-                                                        width:
-                                                            (rect[2] - rect[0])
-                                                                .abs() *
-                                                            96 /
-                                                            72 *
-                                                            fitScale,
-                                                        height:
-                                                            (rect[3] - rect[1])
-                                                                .abs() *
-                                                            96 /
-                                                            72 *
-                                                            fitScale,
-                                                        child: IgnorePointer(
-                                                          child: DecoratedBox(
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              color:
-                                                                  matchIdx ==
-                                                                      _findActiveIndex
-                                                                  ? const Color(
-                                                                      0xFFFF9800,
-                                                                    ).withValues(
-                                                                      alpha:
-                                                                          0.50,
-                                                                    )
-                                                                  : Colors
-                                                                      .yellow
+                                          ),
+                                          if (_finding &&
+                                              _findMatches.isNotEmpty)
+                                            for (
+                                              var matchIdx = 0;
+                                              matchIdx < _findMatches.length;
+                                              matchIdx++
+                                            )
+                                              if (_findMatches[matchIdx].page ==
+                                                  _page)
+                                                for (final rect
+                                                    in _findMatches[matchIdx]
+                                                        .rects)
+                                                  if (rect.length == 4)
+                                                    Positioned(
+                                                      left:
+                                                          math.min(
+                                                            rect[0],
+                                                            rect[2],
+                                                          ) *
+                                                          96 /
+                                                          72 *
+                                                          fitScale,
+                                                      top:
+                                                          math.min(
+                                                            rect[1],
+                                                            rect[3],
+                                                          ) *
+                                                          96 /
+                                                          72 *
+                                                          fitScale,
+                                                      width:
+                                                          (rect[2] - rect[0])
+                                                              .abs() *
+                                                          96 /
+                                                          72 *
+                                                          fitScale,
+                                                      height:
+                                                          (rect[3] - rect[1])
+                                                              .abs() *
+                                                          96 /
+                                                          72 *
+                                                          fitScale,
+                                                      child: IgnorePointer(
+                                                        child: DecoratedBox(
+                                                          decoration: BoxDecoration(
+                                                            color:
+                                                                matchIdx ==
+                                                                    _findActiveIndex
+                                                                ? const Color(
+                                                                    0xFFFF9800,
+                                                                  ).withValues(
+                                                                    alpha: 0.50,
+                                                                  )
+                                                                : Colors.yellow
                                                                       .withValues(
                                                                         alpha:
                                                                             0.35,
                                                                       ),
-                                                              borderRadius:
-                                                                  BorderRadius.circular(
-                                                                    2,
-                                                                  ),
-                                                              border: Border.all(
-                                                                color:
-                                                                    matchIdx ==
-                                                                        _findActiveIndex
-                                                                    ? Colors
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  2,
+                                                                ),
+                                                            border: Border.all(
+                                                              color:
+                                                                  matchIdx ==
+                                                                      _findActiveIndex
+                                                                  ? Colors
                                                                         .deepOrange
-                                                                    : const Color(
-                                                                        0xFFC79100,
-                                                                      ),
-                                                                width:
-                                                                    matchIdx ==
-                                                                        _findActiveIndex
-                                                                    ? 2.0
-                                                                    : 1.0,
-                                                              ),
+                                                                  : const Color(
+                                                                      0xFFC79100,
+                                                                    ),
+                                                              width:
+                                                                  matchIdx ==
+                                                                      _findActiveIndex
+                                                                  ? 2.0
+                                                                  : 1.0,
                                                             ),
                                                           ),
                                                         ),
                                                       ),
-                                            if (selectionStart != null &&
-                                                selectionEnd != null)
-                                              for (
-                                                var line = selectionStart;
-                                                line <= selectionEnd;
-                                                line++
-                                              )
-                                                if (_pageTextLines[line]
-                                                        .rect
-                                                        .length ==
-                                                    4)
-                                                  Positioned(
-                                                    left:
-                                                        _pageTextLines[line]
-                                                            .rect[0] *
-                                                        96 /
-                                                        72 *
-                                                        fitScale,
-                                                    top:
-                                                        _pageTextLines[line]
-                                                            .rect[1] *
-                                                        96 /
-                                                        72 *
-                                                        fitScale,
-                                                    width:
-                                                        (_pageTextLines[line]
-                                                                .rect[2] -
-                                                            _pageTextLines[line]
-                                                                .rect[0]) *
-                                                        96 /
-                                                        72 *
-                                                        fitScale,
-                                                    height:
-                                                        (_pageTextLines[line]
-                                                                .rect[3] -
-                                                            _pageTextLines[line]
-                                                                .rect[1]) *
-                                                        96 /
-                                                        72 *
-                                                        fitScale,
-                                                    child: IgnorePointer(
-                                                      child: DecoratedBox(
-                                                        decoration: BoxDecoration(
+                                                    ),
+                                          if (selectionStart != null &&
+                                              selectionEnd != null)
+                                            for (
+                                              var line = selectionStart;
+                                              line <= selectionEnd;
+                                              line++
+                                            )
+                                              if (_pageTextLines[line]
+                                                      .rect
+                                                      .length ==
+                                                  4)
+                                                Positioned(
+                                                  left:
+                                                      _pageTextLines[line]
+                                                          .rect[0] *
+                                                      96 /
+                                                      72 *
+                                                      fitScale,
+                                                  top:
+                                                      _pageTextLines[line]
+                                                          .rect[1] *
+                                                      96 /
+                                                      72 *
+                                                      fitScale,
+                                                  width:
+                                                      (_pageTextLines[line]
+                                                              .rect[2] -
+                                                          _pageTextLines[line]
+                                                              .rect[0]) *
+                                                      96 /
+                                                      72 *
+                                                      fitScale,
+                                                  height:
+                                                      (_pageTextLines[line]
+                                                              .rect[3] -
+                                                          _pageTextLines[line]
+                                                              .rect[1]) *
+                                                      96 /
+                                                      72 *
+                                                      fitScale,
+                                                  child: IgnorePointer(
+                                                    child: DecoratedBox(
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            _textSelectionKind ==
+                                                                'highlight'
+                                                            ? _selectionColorForName(
+                                                                _textSelectionColor,
+                                                              ).withValues(
+                                                                alpha: 0.38,
+                                                              )
+                                                            : Colors.blue
+                                                                  .withValues(
+                                                                    alpha: 0.10,
+                                                                  ),
+                                                        border: Border.all(
                                                           color:
                                                               _textSelectionKind ==
                                                                   'highlight'
-                                                              ? _selectionColorForName(
-                                                                  _textSelectionColor,
-                                                                ).withValues(
-                                                                  alpha: 0.38,
-                                                                )
-                                                              : Colors.blue
-                                                                    .withValues(
-                                                                      alpha:
-                                                                          0.10,
-                                                                    ),
-                                                          border: Border.all(
-                                                            color:
-                                                                _textSelectionKind ==
-                                                                    'highlight'
-                                                                ? (_textSelectionColor ==
+                                                              ? (_textSelectionColor ==
                                                                         'yellow'
                                                                     ? const Color(
                                                                         0xFFC79100,
@@ -2766,66 +2701,55 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                                                     : _selectionColorForName(
                                                                         _textSelectionColor,
                                                                       ))
-                                                                : Colors.blue,
-                                                            width: 1.5,
-                                                          ),
+                                                              : Colors.blue,
+                                                          width: 1.5,
                                                         ),
                                                       ),
                                                     ),
                                                   ),
-                                            if (selectionStart != null &&
-                                                selectionEnd != null) ...[
-                                              selectionHandle(
-                                                selectionStart,
-                                                true,
-                                              ),
-                                              selectionHandle(
-                                                selectionEnd,
-                                                false,
-                                              ),
-                                            ],
-                                            for (final marker in _markers)
-                                              Positioned(
-                                                left: marker.x * fitScale - 24,
-                                                top: marker.y * fitScale - 24,
-                                                child: Semantics(
-                                                  button: true,
-                                                  label:
-                                                      '${marker.label} on page $_page. Double tap to view comments.',
-                                                  child: GestureDetector(
-                                                    behavior:
-                                                        HitTestBehavior.opaque,
-                                                    onTap: () => _openComments(
-                                                      page: _page,
-                                                      focusIndex: marker.index,
-                                                    ),
-                                                    child: SizedBox(
-                                                      width: 48,
-                                                      height: 48,
-                                                      child: Center(
-                                                        child: Tooltip(
-                                                          message: marker.label,
-                                                          child: Container(
-                                                            width: 32,
-                                                            height: 32,
-                                                            decoration: BoxDecoration(
-                                                              color: Theme.of(context)
-                                                                  .colorScheme
-                                                                  .primaryContainer,
-                                                              shape:
-                                                                  BoxShape.circle,
-                                                              border: Border.all(
-                                                                color:
-                                                                    Theme.of(
-                                                                          context,
-                                                                        )
-                                                                        .colorScheme
-                                                                        .primary,
-                                                              ),
-                                                            ),
-                                                            child: Icon(
-                                                              Icons.comment,
-                                                              size: 17,
+                                                ),
+                                          if (selectionStart != null &&
+                                              selectionEnd != null) ...[
+                                            selectionHandle(
+                                              selectionStart,
+                                              true,
+                                            ),
+                                            selectionHandle(
+                                              selectionEnd,
+                                              false,
+                                            ),
+                                          ],
+                                          for (final marker in _markers)
+                                            Positioned(
+                                              left: marker.x * fitScale - 24,
+                                              top: marker.y * fitScale - 24,
+                                              child: Semantics(
+                                                button: true,
+                                                label:
+                                                    '${marker.label} on page $_page. Double tap to view comments.',
+                                                child: GestureDetector(
+                                                  behavior:
+                                                      HitTestBehavior.opaque,
+                                                  onTap: () => _openComments(
+                                                    page: _page,
+                                                    focusIndex: marker.index,
+                                                  ),
+                                                  child: SizedBox(
+                                                    width: 48,
+                                                    height: 48,
+                                                    child: Center(
+                                                      child: Tooltip(
+                                                        message: marker.label,
+                                                        child: Container(
+                                                          width: 32,
+                                                          height: 32,
+                                                          decoration: BoxDecoration(
+                                                            color: Theme.of(context)
+                                                                .colorScheme
+                                                                .primaryContainer,
+                                                            shape:
+                                                                BoxShape.circle,
+                                                            border: Border.all(
                                                               color:
                                                                   Theme.of(
                                                                         context,
@@ -2834,13 +2758,24 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                                                       .primary,
                                                             ),
                                                           ),
+                                                          child: Icon(
+                                                            Icons.comment,
+                                                            size: 17,
+                                                            color:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .primary,
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
                                                   ),
                                                 ),
                                               ),
-                                          ],
+                                            ),
+                                        ],
                                       ),
                                     ),
                                   ),
@@ -2848,320 +2783,319 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                               ),
                             ),
 
-                          // Floating Overlay: Accessible single-pointer zoom HUD
-                          Positioned(
-                            left: 16,
-                            bottom: 16,
-                            child: ZoomControlsHud(
-                              transformController: _viewerTransform,
-                              minScale: 1,
-                              maxScale: 8,
-                              viewportSize: Size(
-                                constraints.maxWidth,
-                                constraints.maxHeight,
-                              ),
-                            ),
-                          ),
-
-                          // Floating Overlay: Find Bar HUD
-                          if (_finding && _doc != null)
-                            Positioned(
-                              top: 12,
-                              left: 16,
-                              right: 16,
-                              child: FindBar(
-                                engine: _engine!,
-                                handle: _doc!,
-                                onJumpToPage: _goto,
-                                onMatchesChanged: (matches) =>
-                                    setState(() => _findMatches = matches),
-                                onActiveIndexChanged: (index) =>
-                                    setState(() => _findActiveIndex = index),
-                                onClose: () => setState(() {
-                                  _finding = false;
-                                  _findMatches = const [];
-                                  _findActiveIndex = -1;
-                                }),
-                              ),
-                            ),
-
-                          // Floating Overlay: Compact Quick Action Floating Bar
-                          if (_textSelectionAnchor != null &&
-                              _textSelectionExtent != null)
+                            // Floating Overlay: Accessible single-pointer zoom HUD
                             Positioned(
                               left: 16,
-                              right: 16,
                               bottom: 16,
-                              child: Center(
-                                child: Material(
-                                  elevation: 8,
-                                  shadowColor: Colors.black38,
-                                  borderRadius: BorderRadius.circular(28),
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                      .withValues(alpha: 0.98),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // Highlight button (1-tap instant action)
-                                        Tooltip(
-                                          message:
-                                              'Highlight ($selectedLineCount lines)',
-                                          child: InkWell(
-                                            borderRadius:
-                                                BorderRadius.circular(20),
-                                            onTap: _busy
-                                                ? null
-                                                : () => _applyTextSelection(
-                                                    kind: 'highlight',
-                                                  ),
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 8,
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.border_color_outlined,
-                                                    size: 19,
-                                                    color:
-                                                        _selectionColorForName(
-                                                      _textSelectionColor,
+                              child: ZoomControlsHud(
+                                transformController: _viewerTransform,
+                                minScale: 1,
+                                maxScale: 8,
+                                viewportSize: Size(
+                                  constraints.maxWidth,
+                                  constraints.maxHeight,
+                                ),
+                              ),
+                            ),
+
+                            // Floating Overlay: Find Bar HUD
+                            if (_finding && _doc != null)
+                              Positioned(
+                                top: 12,
+                                left: 16,
+                                right: 16,
+                                child: FindBar(
+                                  engine: _engine!,
+                                  handle: _doc!,
+                                  onJumpToPage: _goto,
+                                  onMatchesChanged: (matches) =>
+                                      setState(() => _findMatches = matches),
+                                  onActiveIndexChanged: (index) =>
+                                      setState(() => _findActiveIndex = index),
+                                  onClose: () => setState(() {
+                                    _finding = false;
+                                    _findMatches = const [];
+                                    _findActiveIndex = -1;
+                                  }),
+                                ),
+                              ),
+
+                            // Floating Overlay: Compact Quick Action Floating Bar
+                            if (_textSelectionAnchor != null &&
+                                _textSelectionExtent != null)
+                              Positioned(
+                                left: 16,
+                                right: 16,
+                                bottom: 16,
+                                child: Center(
+                                  child: Material(
+                                    elevation: 8,
+                                    shadowColor: Colors.black38,
+                                    borderRadius: BorderRadius.circular(28),
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest
+                                        .withValues(alpha: 0.98),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // Highlight button (1-tap instant action)
+                                          Tooltip(
+                                            message:
+                                                'Highlight ($selectedLineCount lines)',
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              onTap: _busy
+                                                  ? null
+                                                  : () => _applyTextSelection(
+                                                      kind: 'highlight',
                                                     ),
-                                                  ),
-                                                  const SizedBox(width: 5),
-                                                  const Text(
-                                                    'Highlight',
-                                                    style: TextStyle(
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 8,
                                                     ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        // Color cycle picker dot
-                                        PopupMenuButton<String>(
-                                          tooltip: 'Change highlight color',
-                                          initialValue: _textSelectionColor,
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(
-                                            minWidth: 40,
-                                          ),
-                                          icon: Container(
-                                            width: 16,
-                                            height: 16,
-                                            decoration: BoxDecoration(
-                                              color: _selectionColorForName(
-                                                _textSelectionColor,
-                                              ),
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: Colors.white,
-                                                width: 1.5,
-                                              ),
-                                            ),
-                                          ),
-                                          onSelected: (color) => setState(
-                                            () => _textSelectionColor = color,
-                                          ),
-                                          itemBuilder: (context) => [
-                                            for (final c in const [
-                                              'yellow',
-                                              'green',
-                                              'blue',
-                                              'red',
-                                            ])
-                                              PopupMenuItem(
-                                                value: c,
                                                 child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
                                                   children: [
-                                                    Container(
-                                                      width: 16,
-                                                      height: 16,
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            _selectionColorForName(
-                                                          c,
-                                                        ),
-                                                        shape: BoxShape.circle,
-                                                      ),
+                                                    Icon(
+                                                      Icons
+                                                          .border_color_outlined,
+                                                      size: 19,
+                                                      color:
+                                                          _selectionColorForName(
+                                                            _textSelectionColor,
+                                                          ),
                                                     ),
-                                                    const SizedBox(width: 10),
-                                                    Text(
-                                                      c[0].toUpperCase() +
-                                                          c.substring(1),
+                                                    const SizedBox(width: 5),
+                                                    const Text(
+                                                      'Highlight',
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
                                                     ),
                                                   ],
                                                 ),
                                               ),
-                                          ],
-                                        ),
-                                        Container(
-                                          height: 24,
-                                          width: 1,
-                                          margin: const EdgeInsets.symmetric(
-                                            horizontal: 4,
+                                            ),
                                           ),
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .outlineVariant,
-                                        ),
-                                        // Underline button
-                                        IconButton(
-                                          tooltip: 'Underline',
-                                          iconSize: 20,
-                                          padding: const EdgeInsets.all(8),
-                                          constraints: const BoxConstraints(),
-                                          onPressed: _busy
-                                              ? null
-                                              : () => _applyTextSelection(
-                                                  kind: 'underline',
+                                          // Color cycle picker dot
+                                          PopupMenuButton<String>(
+                                            tooltip: 'Change highlight color',
+                                            initialValue: _textSelectionColor,
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 40,
+                                            ),
+                                            icon: Container(
+                                              width: 16,
+                                              height: 16,
+                                              decoration: BoxDecoration(
+                                                color: _selectionColorForName(
+                                                  _textSelectionColor,
                                                 ),
-                                          icon: const Icon(
-                                            Icons.format_underlined,
-                                          ),
-                                        ),
-                                        // Strikeout button
-                                        IconButton(
-                                          tooltip: 'Strikethrough',
-                                          iconSize: 20,
-                                          padding: const EdgeInsets.all(8),
-                                          constraints: const BoxConstraints(),
-                                          onPressed: _busy
-                                              ? null
-                                              : () => _applyTextSelection(
-                                                  kind: 'strikeout',
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: Colors.white,
+                                                  width: 1.5,
                                                 ),
-                                          icon: const Icon(
-                                            Icons.format_strikethrough,
+                                              ),
+                                            ),
+                                            onSelected: (color) => setState(
+                                              () => _textSelectionColor = color,
+                                            ),
+                                            itemBuilder: (context) => [
+                                              for (final c in const [
+                                                'yellow',
+                                                'green',
+                                                'blue',
+                                                'red',
+                                              ])
+                                                PopupMenuItem(
+                                                  value: c,
+                                                  child: Row(
+                                                    children: [
+                                                      Container(
+                                                        width: 16,
+                                                        height: 16,
+                                                        decoration: BoxDecoration(
+                                                          color:
+                                                              _selectionColorForName(
+                                                                c,
+                                                              ),
+                                                          shape:
+                                                              BoxShape.circle,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 10),
+                                                      Text(
+                                                        c[0].toUpperCase() +
+                                                            c.substring(1),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                            ],
                                           ),
-                                        ),
-                                        // Copy button
-                                        IconButton(
-                                          tooltip: 'Copy text',
-                                          iconSize: 20,
-                                          padding: const EdgeInsets.all(8),
-                                          constraints: const BoxConstraints(),
-                                          onPressed: _copyTextSelection,
-                                          icon: const Icon(Icons.copy_outlined),
-                                        ),
-                                        Container(
-                                          height: 24,
-                                          width: 1,
-                                          margin: const EdgeInsets.symmetric(
-                                            horizontal: 4,
+                                          Container(
+                                            height: 24,
+                                            width: 1,
+                                            margin: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                            ),
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outlineVariant,
                                           ),
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .outlineVariant,
-                                        ),
-                                        // Close / Clear selection button
-                                        IconButton(
-                                          tooltip: 'Clear selection',
-                                          iconSize: 20,
-                                          padding: const EdgeInsets.all(8),
-                                          constraints: const BoxConstraints(),
-                                          onPressed: () => setState(() {
-                                            _textSelectionAnchor = null;
-                                            _textSelectionExtent = null;
-                                          }),
-                                          icon: const Icon(Icons.close),
-                                        ),
-                                      ],
+                                          // Underline button
+                                          IconButton(
+                                            tooltip: 'Underline',
+                                            iconSize: 20,
+                                            padding: const EdgeInsets.all(8),
+                                            constraints: const BoxConstraints(),
+                                            onPressed: _busy
+                                                ? null
+                                                : () => _applyTextSelection(
+                                                    kind: 'underline',
+                                                  ),
+                                            icon: const Icon(
+                                              Icons.format_underlined,
+                                            ),
+                                          ),
+                                          // Strikeout button
+                                          IconButton(
+                                            tooltip: 'Strikethrough',
+                                            iconSize: 20,
+                                            padding: const EdgeInsets.all(8),
+                                            constraints: const BoxConstraints(),
+                                            onPressed: _busy
+                                                ? null
+                                                : () => _applyTextSelection(
+                                                    kind: 'strikeout',
+                                                  ),
+                                            icon: const Icon(
+                                              Icons.format_strikethrough,
+                                            ),
+                                          ),
+                                          // Copy button
+                                          IconButton(
+                                            tooltip: 'Copy text',
+                                            iconSize: 20,
+                                            padding: const EdgeInsets.all(8),
+                                            constraints: const BoxConstraints(),
+                                            onPressed: _copyTextSelection,
+                                            icon: const Icon(
+                                              Icons.copy_outlined,
+                                            ),
+                                          ),
+                                          Container(
+                                            height: 24,
+                                            width: 1,
+                                            margin: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                            ),
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outlineVariant,
+                                          ),
+                                          // Close / Clear selection button
+                                          IconButton(
+                                            tooltip: 'Clear selection',
+                                            iconSize: 20,
+                                            padding: const EdgeInsets.all(8),
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () => setState(() {
+                                              _textSelectionAnchor = null;
+                                              _textSelectionExtent = null;
+                                            }),
+                                            icon: const Icon(Icons.close),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
-          ),
-          const Divider(height: 1),
-          if (_doc != null)
-            NavigationBar(
-              height: 68,
-              selectedIndex: _activeSurface,
-              onDestinationSelected: _openSurface,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.chrome_reader_mode_outlined),
-                  label: 'Read',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.edit_outlined),
-                  label: 'Edit',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.folder_copy_outlined),
-                  label: 'Organize',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.auto_awesome_outlined),
-                  label: 'Agent',
-                ),
-              ],
+                          ],
+                        );
+                      },
+                    ),
             ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 8,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    _status,
-                    style: Theme.of(context).textTheme.bodySmall,
-                    overflow: TextOverflow.ellipsis,
+            if (_doc != null) ...[
+              const Divider(height: 1),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Previous page',
+                    onPressed: _busy || _page <= 1
+                        ? null
+                        : () => _goto(_page - 1),
+                    icon: const Icon(Icons.chevron_left),
                   ),
-                ),
-                if (_doc != null)
-                  Row(
+                  TextButton(
+                    onPressed: _busy ? null : _goToPagePrompt,
+                    child: Text('Page $_page of $_pageCount'),
+                  ),
+                  IconButton(
+                    tooltip: 'Next page',
+                    onPressed: _busy || _page >= _pageCount
+                        ? null
+                        : () => _goto(_page + 1),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Row(
                     children: [
-                      IconButton(
-                        tooltip: 'Previous page',
-                        onPressed: _busy || _page <= 1
-                            ? null
-                            : () => _goto(_page - 1),
-                        icon: const Icon(Icons.chevron_left),
-                      ),
-                      Semantics(
-                        button: true,
-                        hint: 'Double tap to enter page number',
-                        child: TextButton(
-                          onPressed: _busy ? null : _goToPagePrompt,
-                          child: Text('$_page / $_pageCount'),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: _busy ? null : _showTools,
+                          icon: const Icon(Icons.tune),
+                          label: const Text('Tools'),
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Next page',
-                        onPressed: _busy || _page >= _pageCount
-                            ? null
-                            : () => _goto(_page + 1),
-                        icon: const Icon(Icons.chevron_right),
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: _busy ? null : _openPages,
+                          icon: const Icon(Icons.grid_view_outlined),
+                          label: const Text('Pages'),
+                        ),
+                      ),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: _busy ? null : _finishDocument,
+                          child: const Text('Finish'),
+                        ),
                       ),
                     ],
                   ),
-              ],
-            ),
-          ),
-        ],
+                ),
+              ),
+            ],
+            if (_busy ||
+                _status.contains('failed') ||
+                _status.startsWith('Could not'))
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Semantics(liveRegion: true, child: Text(_status)),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -3221,9 +3155,13 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         }),
       );
       if (!mounted) return;
+      ({Uint8List bytes, String name})? output;
       await saveToolOutputs(context, engine, [
         for (final c in response.contents) c.json,
-      ]);
+      ], onOpenDocument: (bytes, name) => output = (bytes: bytes, name: name));
+      if (output != null && mounted) {
+        await _openDocumentBytes(output!.name, output!.bytes);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Could not create a blank PDF: $e');
@@ -3232,132 +3170,98 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
-  Widget _emptyDocumentHome() => Center(
-    child: SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+  Widget _emptyDocumentHome() {
+    final enabled = !_busy && !_launchingTask && _engine != null;
+    return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        constraints: const BoxConstraints(maxWidth: 680),
+        child: ListView(
+          padding: const EdgeInsets.all(20),
           children: [
-            Icon(
-              Icons.picture_as_pdf_outlined,
-              size: 72,
-              color: Theme.of(context).colorScheme.primary,
+            Text(
+              'What would you like to do?',
+              style: Theme.of(context).textTheme.headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 16),
-            Text(_status, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            const Text('Work on your PDFs on this device.'),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: enabled ? _open : null,
+              icon: const Icon(Icons.folder_open),
+              label: const Text('Open a PDF'),
+            ),
             const SizedBox(height: 20),
-            if (_recentDocuments.isNotEmpty) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Recent Documents',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+            OutlinedButton.icon(
+              onPressed: enabled ? _showTools : null,
+              icon: const Icon(Icons.search),
+              label: const Text('Browse all tools'),
+            ),
+            const SizedBox(height: 12),
+            for (final task in pdfTasks.take(6))
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: 4,
                 ),
+                leading: Icon(
+                  task.icon,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                title: Text(task.title),
+                subtitle: Text(task.description),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: enabled ? () => _launchTask(task) : null,
+              ),
+
+            const SizedBox(height: 24),
+            if (_engine == null) ...[
+              Text(_status, style: Theme.of(context).textTheme.bodySmall),
+              if (_status.contains('failed'))
+                TextButton(
+                  onPressed: _initEngine,
+                  child: const Text('Try again'),
+                ),
+            ],
+            if (_recentDocuments.isNotEmpty) ...[
+              Text(
+                'Recent documents',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 8),
-              Card(
-                margin: EdgeInsets.zero,
-                clipBehavior: Clip.antiAlias,
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _recentDocuments.length,
-                  separatorBuilder: (context, index) =>
-                      const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final item = _recentDocuments[index];
-                    return Semantics(
-                      button: true,
-                      label:
-                          'Open recent document ${item.name}, ${item.pageCount} pages',
-                      child: ListTile(
-                        dense: true,
-                        leading: CircleAvatar(
-                          radius: 16,
-                          backgroundColor: Theme.of(context)
-                              .colorScheme
-                              .primaryContainer,
-                          child: Icon(
-                            Icons.description_outlined,
-                            size: 18,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer,
-                          ),
-                        ),
-                        title: Text(
-                          item.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w500),
-                        ),
-                        subtitle: Text(
-                          '${item.pageCount} ${item.pageCount == 1 ? "page" : "pages"}${item.byteLength != null && item.byteLength! > 0 ? " • ${(item.byteLength! / 1024).toStringAsFixed(0)} KB" : ""}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        trailing: Semantics(
-                          button: true,
-                          label: 'Remove ${item.name} from recents',
-                          child: IconButton(
-                            icon: const Icon(Icons.close, size: 18),
-                            tooltip: 'Remove from recents',
-                            onPressed: () async {
-                              await _recentStore.removeRecent(item.name);
-                              await _loadRecents();
-                            },
-                          ),
-                        ),
-                        onTap: _busy || _engine == null
-                            ? null
-                            : () => _openRecent(item),
+              for (final item in _recentDocuments)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.description_outlined),
+                  title: Text(
+                    item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${item.pageCount} ${item.pageCount == 1 ? 'page' : 'pages'}',
+                  ),
+                  onTap: enabled ? () => _openRecent(item) : null,
+                  trailing: PopupMenuButton<String>(
+                    tooltip: 'Options for ${item.name}',
+                    onSelected: (_) async {
+                      await _recentStore.removeRecent(item.name);
+                      await _loadRecents();
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'remove',
+                        child: Text('Remove from recents'),
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
             ],
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _busy || _engine == null ? null : _open,
-                icon: const Icon(Icons.folder_open),
-                label: const Text('Open a PDF'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _busy || _engine == null ? null : _openOrganize,
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Create PDF from photos'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _busy || _engine == null ? null : _newBlankPdf,
-                icon: const Icon(Icons.note_add_outlined),
-                label: const Text('Start a blank PDF'),
-              ),
-            ),
-            const SizedBox(height: 4),
-            TextButton.icon(
-              onPressed: _busy || _engine == null ? null : _openOrganize,
-              icon: const Icon(Icons.merge_outlined),
-              label: const Text('Combine PDF files'),
-            ),
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// A tappable comment marker, positioned in render pixels over the page

@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'task_catalog.dart';
+import 'task_workspace.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'file_order_sheet.dart';
@@ -41,18 +44,37 @@ class OrganizeSheet extends StatefulWidget {
 
 class _OrganizeSheetState extends State<OrganizeSheet> {
   bool _busy = false;
-
   @override
   void initState() {
     super.initState();
-    if (widget.initialAction == 'combine') {
+    if (widget.initialAction != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _combine();
+        if (mounted) _startTask();
       });
-    } else if (widget.initialAction == 'images') {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _createFromImages();
-      });
+    }
+  }
+
+  Future<void> _startTask() async {
+    if (_busy) return;
+    switch (widget.initialAction) {
+      case 'combine':
+        await _combine();
+      case 'images':
+        await _createFromImages();
+      case 'split':
+        await _split();
+      case 'extract':
+        await _extract();
+      case 'labels':
+        await _labels();
+      case 'headerFooter':
+        await _headerFooter();
+      case 'watermark':
+        await _watermark();
+      case 'background':
+        await _background();
+      case 'removeMarks':
+        await _removeMarks();
     }
   }
 
@@ -75,12 +97,9 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       // echo the document's own staging path, which must never be offered
       // as if it were a result.
       if (collectOutputs) {
-        await saveToolOutputs(
-          context,
-          widget.engine,
-          [for (final c in response.contents) c.json],
-          onOpenDocument: widget.onOpenDocument,
-        );
+        await saveToolOutputs(context, widget.engine, [
+          for (final c in response.contents) c.json,
+        ], onOpenDocument: widget.onOpenDocument);
       }
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -686,6 +705,21 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.initialAction != null) {
+      final task = pdfTasks.firstWhere(
+        (task) => task.id == widget.initialAction,
+      );
+      return TaskWorkspace(
+        title: task.title,
+        description: task.description,
+        scope: widget.hasDocument
+            ? '${widget.documentName ?? 'Current PDF'} • ${widget.pageCount} pages'
+            : 'New document',
+        busy: _busy,
+        onStart: _startTask,
+      );
+    }
+
     return SafeArea(
       child: SingleChildScrollView(
         child: Padding(

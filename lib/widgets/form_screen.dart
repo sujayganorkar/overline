@@ -468,7 +468,10 @@ class _FormScreenState extends State<FormScreen> {
               children: [
                 // Mode Switcher & Page Selector Strip
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surface,
                     border: Border(
@@ -490,7 +493,10 @@ class _FormScreenState extends State<FormScreen> {
                           ButtonSegment<bool>(
                             value: false,
                             label: Text('Field List'),
-                            icon: Icon(Icons.format_list_bulleted_outlined, size: 16),
+                            icon: Icon(
+                              Icons.format_list_bulleted_outlined,
+                              size: 16,
+                            ),
                           ),
                         ],
                         selected: {_visualMode},
@@ -537,7 +543,10 @@ class _FormScreenState extends State<FormScreen> {
                 ),
                 if (_error != null)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                     child: Text(
                       _error!,
                       style: TextStyle(color: theme.colorScheme.error),
@@ -625,16 +634,15 @@ class _FormScreenState extends State<FormScreen> {
                   clipBehavior: Clip.none,
                   children: [
                     // Base Page Rendering
-                    Positioned.fill(
-                      child: Image.memory(png, fit: BoxFit.fill),
-                    ),
+                    Positioned.fill(child: Image.memory(png, fit: BoxFit.fill)),
                     if (pageFields.isEmpty)
                       Positioned(
                         top: 12,
                         left: 12,
                         right: 12,
                         child: Material(
-                          color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.9),
+                          color: theme.colorScheme.surfaceContainerHigh
+                              .withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(8),
                           elevation: 2,
                           child: Padding(
@@ -675,8 +683,10 @@ class _FormScreenState extends State<FormScreen> {
                           final height = math.max(24.0, (y2 - y1) * scale);
                           final fieldIndex = _fields.indexOf(f);
                           final isFocused = fieldIndex == _focusedFieldIndex;
-                          final valStr = _values[f.name]?.toString().trim() ?? '';
-                          final hasValue = valStr.isNotEmpty && valStr != 'false';
+                          final valStr =
+                              _values[f.name]?.toString().trim() ?? '';
+                          final hasValue =
+                              valStr.isNotEmpty && valStr != 'false';
 
                           return Positioned(
                             left: left,
@@ -694,16 +704,21 @@ class _FormScreenState extends State<FormScreen> {
                                   duration: const Duration(milliseconds: 180),
                                   decoration: BoxDecoration(
                                     color: isFocused
-                                        ? theme.colorScheme.primary.withValues(alpha: 0.28)
+                                        ? theme.colorScheme.primary.withValues(
+                                            alpha: 0.28,
+                                          )
                                         : hasValue
-                                            ? Colors.green.withValues(alpha: 0.12)
-                                            : theme.colorScheme.primary.withValues(alpha: 0.08),
+                                        ? Colors.green.withValues(alpha: 0.12)
+                                        : theme.colorScheme.primary.withValues(
+                                            alpha: 0.08,
+                                          ),
                                     border: Border.all(
                                       color: isFocused
                                           ? theme.colorScheme.primary
                                           : hasValue
-                                              ? Colors.green.shade600
-                                              : theme.colorScheme.primary.withValues(alpha: 0.6),
+                                          ? Colors.green.shade600
+                                          : theme.colorScheme.primary
+                                                .withValues(alpha: 0.6),
                                       width: isFocused ? 2.5 : 1.5,
                                     ),
                                     borderRadius: BorderRadius.circular(3),
@@ -749,7 +764,8 @@ class _FormScreenState extends State<FormScreen> {
                                             ),
                                             decoration: BoxDecoration(
                                               color: theme.colorScheme.primary,
-                                              borderRadius: BorderRadius.circular(4),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
                                             ),
                                             child: Text(
                                               f.name,
@@ -782,7 +798,9 @@ class _FormScreenState extends State<FormScreen> {
   }
 
   Widget _buildBottomAccessoryStrip(ThemeData theme) {
-    if (_fields.isEmpty || _focusedFieldIndex < 0 || _focusedFieldIndex >= _fields.length) {
+    if (_fields.isEmpty ||
+        _focusedFieldIndex < 0 ||
+        _focusedFieldIndex >= _fields.length) {
       return const SizedBox.shrink();
     }
     final activeField = _fields[_focusedFieldIndex];
@@ -845,7 +863,11 @@ class _FormScreenState extends State<FormScreen> {
     );
   }
 
-  Widget _buildFocusedFieldInput(FormField field, ThemeData theme, bool hasNext) {
+  Widget _buildFocusedFieldInput(
+    FormField field,
+    ThemeData theme,
+    bool hasNext,
+  ) {
     if (field.readOnly) {
       return Container(
         padding: const EdgeInsets.all(10),
@@ -867,7 +889,10 @@ class _FormScreenState extends State<FormScreen> {
       return Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(checked ? 'Checked' : 'Unchecked', style: theme.textTheme.bodyMedium),
+          Text(
+            checked ? 'Checked' : 'Unchecked',
+            style: theme.textTheme.bodyMedium,
+          ),
           const SizedBox(width: 8),
           Switch(
             value: checked,
@@ -909,7 +934,7 @@ class _FormScreenState extends State<FormScreen> {
         );
       } else {
         return DropdownButtonFormField<String>(
-          value: items.contains(current) ? current : null,
+          initialValue: items.contains(current) ? current : null,
           decoration: const InputDecoration(
             border: OutlineInputBorder(),
             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -943,7 +968,9 @@ class _FormScreenState extends State<FormScreen> {
           child: TextField(
             controller: _inlineTextController,
             focusNode: _inlineFocusNode,
-            textInputAction: hasNext ? TextInputAction.next : TextInputAction.done,
+            textInputAction: hasNext
+                ? TextInputAction.next
+                : TextInputAction.done,
             onChanged: (val) {
               _values[field.name] = val;
             },
@@ -955,7 +982,10 @@ class _FormScreenState extends State<FormScreen> {
             decoration: InputDecoration(
               hintText: 'Enter ${field.name}',
               border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
               suffixIcon: _inlineTextController.text.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear, size: 18),
@@ -1364,9 +1394,10 @@ class _FormScreenState extends State<FormScreen> {
       );
     } catch (e) {
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).popUntil(
-          (r) => r.isFirst || r is! DialogRoute,
-        );
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).popUntil((r) => r.isFirst || r is! DialogRoute);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not preview field on page: $e')),
         );

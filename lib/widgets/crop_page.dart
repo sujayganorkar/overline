@@ -83,6 +83,11 @@ class _CropPageState extends State<CropPage> {
     }
   }
 
+  Offset _pagePoint(Offset local, double scale) => Offset(
+    (local.dx / scale).clamp(0.0, _imageWidth),
+    (local.dy / scale).clamp(0.0, _imageHeight),
+  );
+
   Rect? _box() {
     final start = _boxStart;
     final end = _boxEnd;
@@ -203,15 +208,30 @@ class _CropPageState extends State<CropPage> {
                 return Center(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onPanStart: (details) => setState(() {
-                      // Display pixels → source pixels so the engine
-                      // receives top-left points, not screen positions.
-                      _boxStart = details.localPosition / scale;
-                      _boxEnd = details.localPosition / scale;
-                      _error = null;
+                    onPanStart: _busy
+                        ? null
+                        : (details) => setState(() {
+                            // Display pixels → source pixels so the engine
+                            // receives top-left points, not screen positions.
+                            _boxStart = _pagePoint(
+                              details.localPosition,
+                              scale,
+                            );
+                            _boxEnd = _pagePoint(details.localPosition, scale);
+                            _error = null;
+                          }),
+                    onPanUpdate: _busy
+                        ? null
+                        : (details) => setState(
+                            () => _boxEnd = _pagePoint(
+                              details.localPosition,
+                              scale,
+                            ),
+                          ),
+                    onPanCancel: () => setState(() {
+                      _boxStart = null;
+                      _boxEnd = null;
                     }),
-                    onPanUpdate: (details) =>
-                        setState(() => _boxEnd = details.localPosition / scale),
                     child: SizedBox(
                       width: width,
                       height: height,
@@ -279,8 +299,7 @@ class _CropPageState extends State<CropPage> {
                         ),
                         Expanded(
                           child: Semantics(
-                            hint:
-                                'Use previous and next page buttons to navigate',
+                            hint: 'Use previous and next page buttons to navigate',
                             child: Text(
                               'Page $_page of ${widget.pageCount}',
                               textAlign: TextAlign.center,

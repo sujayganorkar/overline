@@ -87,7 +87,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Engine ready (PdfCraft Rust core)'), findsWidgets);
+    expect(find.text('What would you like to do?'), findsOneWidget);
+    expect(find.text('Open a PDF'), findsOneWidget);
     expect(find.text('PdfCraft Mobile'), findsOneWidget);
   });
 

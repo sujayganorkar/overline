@@ -27,19 +27,17 @@ class ZoomControlsHud extends StatelessWidget {
     if (viewportSize != null &&
         viewportSize!.width > 0 &&
         viewportSize!.height > 0) {
-      final center = Offset(
-        viewportSize!.width / 2,
-        viewportSize!.height / 2,
-      );
+      final center = Offset(viewportSize!.width / 2, viewportSize!.height / 2);
       final sceneCenter = transformController.toScene(center);
       final dx = center.dx - sceneCenter.dx * targetScale;
       final dy = center.dy - sceneCenter.dy * targetScale;
       final matrix = Matrix4.identity()
-        ..translate(dx, dy)
-        ..scale(targetScale, targetScale);
+        ..translateByDouble(dx, dy, 0, 1)
+        ..scaleByDouble(targetScale, targetScale, 1, 1);
       transformController.value = matrix;
     } else {
-      final matrix = current.clone()..scale(scaleRatio, scaleRatio);
+      final matrix = current.clone()
+        ..scaleByDouble(scaleRatio, scaleRatio, 1, 1);
       transformController.value = matrix;
     }
   }
@@ -133,4 +131,3 @@ class ZoomControlsHud extends StatelessWidget {
     );
   }
 }
-
