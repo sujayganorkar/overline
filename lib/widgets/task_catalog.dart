@@ -84,7 +84,7 @@ const pdfTasks = <PdfTask>[
   ),
   PdfTask(
     'comments',
-    'Comments',
+    'Notes & comments',
     'Read, reply to and manage notes',
     'Read',
     Icons.comment_outlined,

@@ -1803,7 +1803,14 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           handle: doc,
           onStatusChanged: _onOperationStatus,
           onJumpToPage: _goto,
-          onAddComment: () => _openAnnotate(initialMode: AnnotateMode.note),
+          currentPage: _page,
+          pageCount: _pageCount,
+          onAddComment: (page) async {
+            await _goto(page);
+            if (mounted && !_busy && _page == page) {
+              await _openAnnotate(initialMode: AnnotateMode.note);
+            }
+          },
           initialPage: page,
           focusIndex: focusIndex,
         ),
@@ -2768,7 +2775,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                               child: Semantics(
                                                 button: true,
                                                 label:
-                                                    '${marker.label} on page $_page. Double tap to view comments.',
+                                                    'Open ${marker.label} conversation on page $_page.',
                                                 child: GestureDetector(
                                                   behavior:
                                                       HitTestBehavior.opaque,

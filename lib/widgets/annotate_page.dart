@@ -8,6 +8,7 @@ import 'package:file_picker_platform_interface/file_picker_platform_interface.da
 import 'package:flutter/material.dart';
 
 import 'app_notice.dart';
+import 'comment_composer.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
@@ -476,43 +477,75 @@ class _AnnotatePageState extends State<AnnotatePage> {
     });
   }
 
+  bool _noteComposerOpen = false;
+
   Future<void> _placeNote(Offset at) async {
-    final controller = TextEditingController();
+    if (_saving || _noteComposerOpen) return;
+    _noteComposerOpen = true;
+    bridge.DocumentStatus? savedStatus;
     try {
-      final contents = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Add a note'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'Note text',
-              hintText: 'Enter note contents',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Add note'),
-            ),
-          ],
-        ),
+      final saved = await CommentComposer.show(
+        context,
+        title: 'Add a note',
+        page: widget.page,
+        submitLabel: 'Add note',
+        onSubmit: (text) async {
+          final response = await widget.engine.executeTool(
+            handle: widget.handle,
+            tool: 'comment_add',
+            argumentsJson: geo.encodeArgs({
+              'page': widget.page,
+              'type': 'note',
+              'at': [
+                geo.pxToPt(at.dx, widget.dpi),
+                geo.pxToPt(at.dy, widget.dpi),
+              ],
+              'contents': text,
+            }),
+          );
+          savedStatus = response.status;
+        },
       );
-      if (contents == null || contents.trim().isEmpty || !mounted) return;
-      await _execute({
-        'page': widget.page,
-        'type': 'note',
-        'at': [geo.pxToPt(at.dx, widget.dpi), geo.pxToPt(at.dy, widget.dpi)],
-        'contents': contents.trim(),
-      });
+      if (saved != true || savedStatus == null || !mounted) return;
+      _lastStatus = savedStatus;
+      _appliedCount++;
+      widget.onStatusChanged?.call(savedStatus!);
+      if (widget.initialMode == AnnotateMode.note) {
+        Navigator.pop(context, savedStatus);
+        return;
+      }
+      setState(() => _saving = true);
+      try {
+        final png = await widget.engine.renderPagePng(
+          handle: widget.handle,
+          page1Based: widget.page,
+          dpi: widget.dpi,
+        );
+        final image = await decodeImageFromList(png);
+        if (!mounted) {
+          image.dispose();
+          return;
+        }
+        setState(() => _baseImage = image);
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Note added.',
+            kind: NoticeKind.success,
+            action: NoticeAction(label: 'Undo', onPressed: _undoLastAnnotation),
+          ),
+        );
+      } catch (_) {
+        if (mounted) {
+          setState(
+            () => _error = 'Note added, but the page preview could not refresh. Return to the reader to see it.',
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
     } finally {
-      controller.dispose();
+      _noteComposerOpen = false;
     }
   }
 
@@ -1183,7 +1216,7 @@ class _AnnotatePageState extends State<AnnotatePage> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
+        if (didPop || _saving) return;
         Navigator.pop(context, _lastStatus);
       },
       child: Scaffold(
@@ -1191,7 +1224,9 @@ class _AnnotatePageState extends State<AnnotatePage> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             tooltip: _appliedCount > 0 ? 'Done with annotations' : 'Back',
-            onPressed: () => Navigator.pop(context, _lastStatus),
+            onPressed: _saving
+                ? null
+                : () => Navigator.pop(context, _lastStatus),
           ),
           title: Text(
             _mode == AnnotateMode.pan

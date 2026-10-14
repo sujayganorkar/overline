@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'app_notice.dart';
+import 'comment_composer.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
@@ -90,9 +91,6 @@ class CommentReply {
   final String modified;
 }
 
-/// Threaded comments: list, reply, review status, checkmark, lock, edit,
-/// delete. All actions run the matching `comment_*` operation and report
-/// back through [onStatusChanged] so the viewer refreshes.
 class CommentsScreen extends StatefulWidget {
   const CommentsScreen({
     super.key,
@@ -101,32 +99,48 @@ class CommentsScreen extends StatefulWidget {
     required this.onStatusChanged,
     required this.onJumpToPage,
     required this.onAddComment,
+    this.currentPage = 1,
+    this.pageCount = 1,
     this.initialPage,
     this.focusIndex,
   });
-
   final PdfEngineApi engine;
-  final int handle;
+  final int handle, currentPage, pageCount;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
   final ValueChanged<int> onJumpToPage;
-  final Future<void> Function() onAddComment;
-  final int? initialPage;
-  final int? focusIndex;
-
+  final Future<void> Function(int page) onAddComment;
+  final int? initialPage, focusIndex;
   @override
   State<CommentsScreen> createState() => _CommentsScreenState();
 }
 
 class _CommentsScreenState extends State<CommentsScreen> {
-  final _focusedCommentKey = GlobalKey();
-  List<CommentThread> _threads = const [];
-  bool _loading = true;
-  bool _busy = false;
+  List<CommentThread> _threads = [];
+  CommentThread? _selected;
+  bool _loading = true, _busy = false, _initialFocus = true;
+  bool _allAnnotations = false, _composing = false;
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  String _query = '', _filter = 'all';
   String? _error;
+  int? _page;
+  bool get _disabled => _loading || _busy;
+  String _key(CommentThread t) =>
+      t.id.isNotEmpty ? t.id : '${t.page}:${t.index}';
+  bool _resolved(CommentThread t) => t.status.toLowerCase() == 'completed';
+  Map<String, Object?> _target(CommentThread t) =>
+      t.id.isNotEmpty ? {'id': t.id} : {'page': t.page, 'index': t.index};
 
   @override
   void initState() {
     super.initState();
+    _page = widget.initialPage;
     _reload();
   }
 
@@ -139,9 +153,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       final response = await widget.engine.executeTool(
         handle: widget.handle,
         tool: 'comment_list',
-        argumentsJson: jsonEncode({
-          if (widget.initialPage != null) 'page': widget.initialPage,
-        }),
+        argumentsJson: '{}',
       );
       final threads = <CommentThread>[];
       for (final content in response.contents) {
@@ -160,50 +172,192 @@ class _CommentsScreenState extends State<CommentsScreen> {
         }
       }
       if (!mounted) return;
+      final previous = _selected;
+      CommentThread? selected;
+      for (final t in threads) {
+        if (previous != null && _key(t) == _key(previous)) selected = t;
+        if (_initialFocus &&
+            widget.focusIndex == t.index &&
+            (widget.initialPage ?? widget.currentPage) == t.page) {
+          selected = t;
+        }
+      }
       setState(() {
         _threads = threads;
-        _loading = false;
+        _selected = selected;
+        _initialFocus = false;
       });
-      if (widget.focusIndex != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final target = _focusedCommentKey.currentContext;
-          if (target != null) {
-            Scrollable.ensureVisible(
-              target,
-              alignment: 0.2,
-              duration: const Duration(milliseconds: 250),
-            );
-          }
-        });
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not load notes. Try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _mutate(String tool, Map<String, Object?> args) async {
+    final response = await widget.engine.executeTool(
+      handle: widget.handle,
+      tool: tool,
+      argumentsJson: jsonEncode(args),
+    );
+    widget.onStatusChanged(response.status);
+  }
+
+  Future<void> _run(String tool, Map<String, Object?> args) async {
+    if (_disabled) return;
+    setState(() => _busy = true);
+    try {
+      await _mutate(tool, args);
+      if (!mounted) return;
+      if (tool == 'comment_delete') setState(() => _selected = null);
+      await _reload();
+      if (mounted && tool == 'comment_delete') {
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Conversation deleted.',
+            kind: NoticeKind.success,
+            action: NoticeAction(
+              label: 'Undo',
+              onPressed: () => _run('edit_undo', {}),
+            ),
+          ),
+        );
       }
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _loading = false;
-      });
+      if (mounted) {
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not ${_commentAction(tool)}.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _compose(CommentThread t, {bool edit = false}) async {
+    if (_disabled || t.locked) return;
+    setState(() {
+      _busy = true;
+      _composing = true;
+    });
+    try {
+      final saved = await CommentComposer.show(
+        context,
+        title: edit ? 'Edit note' : 'Reply to note',
+        page: t.page,
+        submitLabel: edit ? 'Save changes' : 'Add reply',
+        initialText: edit ? t.contents : '',
+        contextText: edit ? null : t.contents,
+        onSubmit: (text) => _mutate(edit ? 'comment_edit' : 'comment_reply', {
+          ..._target(t),
+          if (edit) 'contents': text else 'text': text,
+        }),
+      );
+      if (saved == true && mounted) await _reload();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _composing = false;
+        });
+      }
     }
   }
 
   Future<void> _addComment() async {
-    if (_loading || _busy) return;
-    await widget.onAddComment();
-    if (mounted) await _reload();
+    if (_disabled) return;
+    int chosen = _page ?? widget.currentPage;
+    final page = await showDialog<int>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Add a note'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Choose a page, then tap where the note belongs.'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<int>(
+                initialValue: chosen,
+                decoration: const InputDecoration(
+                  labelText: 'Page',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (var p = 1; p <= widget.pageCount; p++)
+                    DropdownMenuItem(value: p, child: Text('Page $p')),
+                ],
+                onChanged: (value) {
+                  if (value != null) update(() => chosen = value);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, chosen),
+              child: const Text('Place note'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (page == null || !mounted) return;
+    final before = _threads.map(_key).toSet();
+    setState(() => _busy = true);
+    try {
+      await widget.onAddComment(page);
+      if (!mounted) return;
+      await _reload();
+      if (!mounted) return;
+      for (final t in _threads) {
+        if (t.page == page && !before.contains(_key(t))) {
+          setState(() {
+            _selected = t;
+            _page = null;
+          });
+          break;
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not open the page for your note.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  Future<void> _run(
-    String tool,
-    Map<String, Object?> args, {
-    bool confirmDelete = false,
-  }) async {
-    if (confirmDelete) {
+  Future<void> _more(String action, CommentThread t) async {
+    if (_disabled) return;
+    if (action == 'edit') {
+      await _compose(t, edit: true);
+      return;
+    }
+    if (action == 'delete') {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Delete comment?'),
+          title: const Text('Delete conversation?'),
           content: const Text(
-            'The comment and its replies will be removed. This is undoable.',
+            'This removes the note and all replies from the PDF. You can undo this.',
           ),
           actions: [
             TextButton(
@@ -217,432 +371,416 @@ class _CommentsScreenState extends State<CommentsScreen> {
           ],
         ),
       );
-      if (ok != true || !mounted) return;
-    }
-    setState(() => _busy = true);
-    try {
-      final response = await widget.engine.executeTool(
-        handle: widget.handle,
-        tool: tool,
-        argumentsJson: jsonEncode(args),
-      );
-      if (!mounted) return;
-      widget.onStatusChanged(response.status);
-      await _reload();
-    } catch (e) {
-      if (!mounted) return;
-      AppNotice.show(
-        context,
-        AppNotice(
-          message: 'Could not ${_commentAction(tool)}.',
-          kind: NoticeKind.error,
-          details: '$e',
+      if (ok == true) await _run('comment_delete', _target(t));
+    } else if (action == 'lock') {
+      await _run('comment_lock', {..._target(t), 'locked': !t.locked});
+    } else if (action == 'mark') {
+      await _run('comment_mark', {..._target(t), 'marked': !t.marked});
+    } else if (action == 'status') {
+      final status = await showDialog<String>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: const Text('Review status'),
+          children: [
+            for (final entry in {
+              'none': 'Open',
+              'accepted': 'Accepted',
+              'rejected': 'Rejected',
+              'cancelled': 'Cancelled',
+              'completed': 'Resolved',
+            }.entries)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, entry.key),
+                child: Text(entry.value),
+              ),
+          ],
         ),
       );
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (status != null) {
+        await _run('comment_set_status', {..._target(t), 'status': status});
+      }
     }
   }
 
-  Map<String, Object?> _target(CommentThread thread) => {
-    'page': thread.page,
-    'index': thread.index,
-  };
-
   Future<void> _summarize() async {
+    if (_disabled) return;
     setState(() => _busy = true);
     try {
       final response = await widget.engine.executeTool(
         handle: widget.handle,
         tool: 'comments_summarize',
-        argumentsJson: '{"out": "outputs/comments-summary.pdf"}',
+        argumentsJson: '{"out":"outputs/comments-summary.pdf"}',
       );
-      if (!mounted) return;
-      await saveToolOutputs(context, widget.engine, [
-        for (final c in response.contents) c.json,
-      ]);
+      if (mounted) {
+        await saveToolOutputs(context, widget.engine, [
+          for (final c in response.contents) c.json,
+        ]);
+      }
     } catch (e) {
-      if (!mounted) return;
-      AppNotice.show(
-        context,
-        AppNotice(
-          message: 'Summarize failed.',
-          kind: NoticeKind.error,
-          details: '$e',
-        ),
-      );
+      if (mounted) {
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not export notes.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _loading
-              ? 'Comments'
-              : 'Comments${widget.initialPage == null ? '' : ' · page ${widget.initialPage}'} (${_threads.length})',
-        ),
-        actions: [
-          IconButton(
-            onPressed: _loading || _busy ? null : _addComment,
-            icon: const Icon(Icons.add_comment_outlined),
-            tooltip: 'Add a note to the current page',
-          ),
-          IconButton(
-            onPressed: _loading ? null : _reload,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-          ),
-          IconButton(
-            onPressed: _loading || _busy ? null : _summarize,
-            icon: const Icon(Icons.summarize_outlined),
-            tooltip: 'Summarize to PDF',
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(child: Text(_error!))
-          : _threads.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'No comments yet. Add a note to start a conversation.',
-                    textAlign: TextAlign.center,
+  Widget _conversation(CommentThread t) => Column(
+    children: [
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Chip(label: Text('Page ${t.page}')),
+                Chip(
+                  label: Text(
+                    _resolved(t)
+                        ? 'Resolved'
+                        : t.status.toLowerCase() == 'none'
+                        ? 'Open'
+                        : t.status,
                   ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _loading || _busy ? null : _addComment,
-                    icon: const Icon(Icons.add_comment_outlined),
-                    label: const Text('Add a note'),
+                ),
+                if (t.locked)
+                  const Chip(
+                    avatar: Icon(Icons.lock_outline, size: 16),
+                    label: Text('Locked'),
+                  ),
+                if (t.marked) const Chip(label: Text('Checked')),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              t.author.isEmpty ? 'Note' : t.author,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 8),
+            SelectableText(
+              t.contents.isEmpty
+                  ? 'No text on this ${t.type} annotation.'
+                  : t.contents,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _disabled
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        widget.onJumpToPage(t.page);
+                      },
+                icon: const Icon(Icons.find_in_page_outlined),
+                label: const Text('Show on page'),
+              ),
+            ),
+            const Divider(height: 32),
+            Text(
+              '${t.replies.length} ${t.replies.length == 1 ? 'reply' : 'replies'}',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            if (t.replies.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text('Add a reply to continue this conversation.'),
+              ),
+            for (final r in t.replies)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          r.author.isEmpty ? 'Reply' : r.author,
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(r.contents),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (t.locked)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Unlock this note in More options to make changes.',
+                  ),
+                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _disabled || t.locked
+                          ? null
+                          : () => _compose(t),
+                      icon: const Icon(Icons.reply),
+                      label: const Text('Reply'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _disabled || t.locked
+                          ? null
+                          : () => _run('comment_set_status', {
+                              ..._target(t),
+                              'status': _resolved(t) ? 'none' : 'completed',
+                            }),
+                      icon: Icon(_resolved(t) ? Icons.refresh : Icons.check),
+                      label: Text(_resolved(t) ? 'Reopen' : 'Resolve'),
+                    ),
                   ),
                 ],
               ),
-            )
-          : Stack(
-              children: [
-                ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 80),
-                  itemCount: _threads.length,
-                  itemBuilder: (context, i) => _ThreadCard(
-                    key: _threads[i].index == widget.focusIndex
-                        ? _focusedCommentKey
-                        : ValueKey('${_threads[i].page}-${_threads[i].index}'),
-                    thread: _threads[i],
-                    onJump: () {
-                      widget.onJumpToPage(_threads[i].page);
-                      Navigator.pop(context);
-                    },
-                    onReply: (text) => _run('comment_reply', {
-                      ..._target(_threads[i]),
-                      'text': text,
-                    }),
-                    onStatus: (status) => _run('comment_set_status', {
-                      ..._target(_threads[i]),
-                      'status': status,
-                    }),
-                    onMark: (marked) => _run('comment_mark', {
-                      ..._target(_threads[i]),
-                      'marked': marked,
-                    }),
-                    onLock: (locked) => _run('comment_lock', {
-                      ..._target(_threads[i]),
-                      'locked': locked,
-                    }),
-                    onEdit: (contents) => _run('comment_edit', {
-                      ..._target(_threads[i]),
-                      'contents': contents,
-                    }),
-                    onDelete: () => _run(
-                      'comment_delete',
-                      _target(_threads[i]),
-                      confirmDelete: true,
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
+
+  Widget _list() {
+    final visible = _threads
+        .where(
+          (t) =>
+              (_page == null || t.page == _page) &&
+              (_filter == 'all' || (_filter == 'resolved') == _resolved(t)) &&
+              (_allAnnotations ||
+                  t.type == 'note' ||
+                  t.type == 'text' ||
+                  t.contents.isNotEmpty ||
+                  t.replies.isNotEmpty) &&
+              (t.contents.toLowerCase().contains(_query) ||
+                  t.author.toLowerCase().contains(_query) ||
+                  t.replies.any(
+                    (r) => '${r.author} ${r.contents}'.toLowerCase().contains(
+                      _query,
                     ),
-                    highlighted: _threads[i].index == widget.focusIndex,
+                  )),
+        )
+        .toList();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            controller: _search,
+            decoration: const InputDecoration(
+              hintText: 'Search notes and replies',
+              prefixIcon: Icon(Icons.search),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (v) => setState(() => _query = v.toLowerCase().trim()),
+          ),
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              for (final e in {
+                'all': 'All',
+                'open': 'Open',
+                'resolved': 'Resolved',
+              }.entries)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(e.value),
+                    selected: _filter == e.key,
+                    onSelected: (_) => setState(() => _filter = e.key),
                   ),
                 ),
-                if (_busy)
-                  const Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: LinearProgressIndicator(),
+              FilterChip(
+                label: Text(
+                  _page == null
+                      ? 'Page ${widget.currentPage} only'
+                      : 'Page $_page only',
+                ),
+                selected: _page != null,
+                onSelected: (v) =>
+                    setState(() => _page = v ? widget.currentPage : null),
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                label: const Text('All annotations'),
+                selected: _allAnnotations,
+                onSelected: (v) => setState(() => _allAnnotations = v),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: visible.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      _threads.isEmpty
+                          ? 'No notes yet. Add a note where it belongs on the page.'
+                          : 'No notes match these filters.',
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-              ],
-            ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.only(bottom: 88),
+                  itemCount: visible.length,
+                  separatorBuilder: (_, _) =>
+                      const Divider(height: 1, indent: 72),
+                  itemBuilder: (context, i) {
+                    final t = visible[i];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      leading: CircleAvatar(
+                        child: Icon(
+                          _resolved(t)
+                              ? Icons.check
+                              : Icons.chat_bubble_outline,
+                        ),
+                      ),
+                      title: Text(
+                        t.contents.isEmpty
+                            ? '${t.type} annotation'
+                            : t.contents,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        'Page ${t.page} · ${t.replies.length} replies${t.author.isEmpty ? '' : ' · ${t.author}'}${t.locked ? ' · Locked' : ''}',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _disabled
+                          ? null
+                          : () => setState(() => _selected = t),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
-}
-
-class _ThreadCard extends StatelessWidget {
-  const _ThreadCard({
-    super.key,
-    required this.thread,
-    required this.onJump,
-    required this.onReply,
-    required this.onStatus,
-    required this.onMark,
-    required this.onLock,
-    required this.onEdit,
-    required this.onDelete,
-    this.highlighted = false,
-  });
-
-  final CommentThread thread;
-  final VoidCallback onJump;
-  final ValueChanged<String> onReply;
-  final ValueChanged<String> onStatus;
-  final ValueChanged<bool> onMark;
-  final ValueChanged<bool> onLock;
-  final ValueChanged<String> onEdit;
-  final VoidCallback onDelete;
-  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: highlighted
-          ? Theme.of(context).colorScheme.primaryContainer
-          : null,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(_iconFor(thread.type), size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${_labelFor(thread.type)} · p${thread.page}',
-                    style: Theme.of(context).textTheme.titleSmall,
+    final t = _selected;
+    return PopScope(
+      canPop: !_busy && t == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_busy && t != null) setState(() => _selected = null);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(t == null ? 'Notes & comments' : 'Conversation'),
+          leading: BackButton(
+            onPressed: _busy
+                ? null
+                : () {
+                    if (t != null) {
+                      setState(() => _selected = null);
+                    } else {
+                      Navigator.pop(context);
+                    }
+                  },
+          ),
+          actions: [
+            if (t != null)
+              PopupMenuButton<String>(
+                tooltip: 'More options',
+                enabled: !_disabled,
+                onSelected: (action) => _more(action, t),
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    enabled: !t.locked,
+                    child: const Text('Edit note'),
                   ),
-                ),
-                if (thread.status != 'none')
-                  Chip(
-                    label: Text(thread.status),
-                    visualDensity: VisualDensity.compact,
+                  PopupMenuItem(
+                    value: 'status',
+                    enabled: !t.locked,
+                    child: const Text('Review status'),
                   ),
-                if (thread.marked)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 4),
-                    child: Icon(Icons.check_circle, size: 18),
-                  ),
-                if (thread.locked)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 4),
-                    child: Icon(Icons.lock, size: 18),
-                  ),
-              ],
-            ),
-            if (thread.author.isNotEmpty || thread.modified.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  [
-                    thread.author,
-                    thread.modified,
-                  ].where((s) => s.isNotEmpty).join(' · '),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            if (thread.contents.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(thread.contents),
-              ),
-            for (final reply in thread.replies)
-              Padding(
-                padding: const EdgeInsets.only(top: 6, left: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      reply.author.isEmpty ? 'Reply' : reply.author,
-                      style: Theme.of(context).textTheme.bodySmall,
+                  PopupMenuItem(
+                    value: 'mark',
+                    enabled: !t.locked,
+                    child: Text(
+                      t.marked ? 'Remove checkmark' : 'Mark as checked',
                     ),
-                    Text(reply.contents),
-                  ],
-                ),
+                  ),
+                  PopupMenuItem(
+                    value: 'lock',
+                    child: Text(t.locked ? 'Unlock note' : 'Lock note'),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    enabled: !t.locked,
+                    child: const Text('Delete conversation'),
+                  ),
+                ],
+              )
+            else
+              IconButton(
+                tooltip: 'Export notes to PDF',
+                onPressed: _disabled ? null : _summarize,
+                icon: const Icon(Icons.ios_share),
               ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 0,
-              children: [
-                TextButton.icon(
-                  onPressed: onJump,
-                  icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: const Text('View'),
-                ),
-                TextButton.icon(
-                  onPressed: () => _replyDialog(context, onReply),
-                  icon: const Icon(Icons.reply_outlined, size: 18),
-                  label: const Text('Reply'),
-                ),
-                TextButton.icon(
-                  onPressed: () => _statusDialog(context, onStatus),
-                  icon: const Icon(Icons.fact_check_outlined, size: 18),
-                  label: const Text('Status'),
-                ),
-                IconButton(
-                  onPressed: () => onMark(!thread.marked),
-                  icon: Icon(
-                    thread.marked
-                        ? Icons.check_circle
-                        : Icons.check_circle_outlined,
-                    size: 20,
-                  ),
-                  tooltip: thread.marked ? 'Unmark' : 'Mark done',
-                ),
-                IconButton(
-                  onPressed: () => onLock(!thread.locked),
-                  icon: Icon(
-                    thread.locked ? Icons.lock : Icons.lock_open_outlined,
-                    size: 20,
-                  ),
-                  tooltip: thread.locked ? 'Unlock' : 'Lock',
-                ),
-                IconButton(
-                  onPressed: () =>
-                      _editDialog(context, thread.contents, onEdit),
-                  icon: const Icon(Icons.edit_outlined, size: 20),
-                  tooltip: 'Edit text',
-                ),
-                IconButton(
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outlined, size: 20),
-                  tooltip: 'Delete',
-                ),
-              ],
-            ),
           ],
         ),
+        body: Column(
+          children: [
+            if (_loading || (_busy && !_composing))
+              const LinearProgressIndicator(),
+            if (_error != null)
+              MaterialBanner(
+                content: Text(_error!),
+                actions: [
+                  TextButton(
+                    onPressed: _disabled ? null : _reload,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            Expanded(child: t == null ? _list() : _conversation(t)),
+          ],
+        ),
+        floatingActionButton: t == null
+            ? FloatingActionButton.extended(
+                onPressed: _disabled ? null : _addComment,
+                icon: const Icon(Icons.add_comment_outlined),
+                label: const Text('Add note'),
+              )
+            : null,
       ),
     );
-  }
-
-  static IconData _iconFor(String type) => switch (type.toLowerCase()) {
-    'highlight' => Icons.highlight_outlined,
-    'underline' => Icons.format_underline,
-    'strikeout' || 'strike_out' => Icons.format_strikethrough,
-    'note' || 'text' => Icons.sticky_note_2_outlined,
-    'ink' => Icons.brush_outlined,
-    'freetext' => Icons.text_fields_outlined,
-    _ => Icons.comment_outlined,
-  };
-
-  static String _labelFor(String type) {
-    if (type.isEmpty) return 'Comment';
-    return switch (type.toLowerCase()) {
-      'text' => 'Note',
-      'freetext' || 'typewriter' => 'Text box',
-      'strikeout' || 'strike_out' => 'Strikethrough',
-      'square' || 'rectangle' => 'Rectangle',
-      _ => '${type[0].toUpperCase()}${type.substring(1).toLowerCase()}',
-    };
-  }
-
-  static Future<void> _replyDialog(
-    BuildContext context,
-    ValueChanged<String> onReply,
-  ) async {
-    final controller = TextEditingController();
-    try {
-      final text = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Reply'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'Reply',
-              hintText: 'Write a reply',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Reply'),
-            ),
-          ],
-        ),
-      );
-      if (text != null && text.trim().isNotEmpty) onReply(text.trim());
-    } finally {
-      controller.dispose();
-    }
-  }
-
-  static Future<void> _statusDialog(
-    BuildContext context,
-    ValueChanged<String> onStatus,
-  ) async {
-    const statuses = ['none', 'accepted', 'rejected', 'cancelled', 'completed'];
-    final status = await showDialog<String>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Review status'),
-        children: [
-          for (final s in statuses)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, s),
-              child: Text(s),
-            ),
-        ],
-      ),
-    );
-    if (status != null) onStatus(status);
-  }
-
-  static Future<void> _editDialog(
-    BuildContext context,
-    String current,
-    ValueChanged<String> onEdit,
-  ) async {
-    final controller = TextEditingController(text: current);
-    try {
-      final text = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Edit comment'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'Comment text',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      );
-      if (text != null && text.trim().isNotEmpty) onEdit(text.trim());
-    } finally {
-      controller.dispose();
-    }
   }
 }
