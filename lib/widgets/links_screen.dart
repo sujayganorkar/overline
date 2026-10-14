@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 
@@ -141,9 +143,14 @@ class _LinksScreenState extends State<LinksScreen> {
       await _reload();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      AppNotice.show(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not delete the link: $e')));
+        AppNotice(
+          message: 'Could not delete the link.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

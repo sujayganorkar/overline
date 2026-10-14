@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'output_saver.dart';
@@ -143,14 +145,12 @@ class _OperationBrowserState extends State<OperationBrowser> {
         mimeType: _mimeType(path),
         dialogTitle: 'Save exported file',
       );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            uri == null
-                ? 'Export cancelled'
-                : 'Saved ${path.split('/').last} through Files',
-          ),
+      if (!mounted || uri == null) return;
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Saved ${path.split('/').last} through Files',
+          kind: NoticeKind.success,
         ),
       );
     } catch (error) {

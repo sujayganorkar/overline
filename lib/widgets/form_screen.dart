@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'output_saver.dart';
@@ -228,8 +230,13 @@ class _FormScreenState extends State<FormScreen> {
       widget.onStatusChanged(response.status);
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Field detection done')));
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Field detection done',
+          kind: NoticeKind.success,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -273,8 +280,10 @@ class _FormScreenState extends State<FormScreen> {
       widget.onStatusChanged(response.status);
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Form cleared')));
+      AppNotice.show(
+        context,
+        const AppNotice(message: 'Form cleared', kind: NoticeKind.success),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -357,8 +366,12 @@ class _FormScreenState extends State<FormScreen> {
       widget.onStatusChanged(response.status);
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Values imported — review, then Save.')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Values imported — review, then Save.',
+          kind: NoticeKind.success,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -402,8 +415,12 @@ class _FormScreenState extends State<FormScreen> {
       if (!mounted) return;
       widget.onStatusChanged(response.status);
       Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Form values applied to document')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Form values applied to document',
+          kind: NoticeKind.success,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -1083,11 +1100,11 @@ class _FormScreenState extends State<FormScreen> {
         }
       }
       if (matches.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No exact field labels matched. Check the labels and try again.',
-            ),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'No exact field labels matched. Check the labels and try again.',
+            kind: NoticeKind.warning,
           ),
         );
         return;
@@ -1262,8 +1279,12 @@ class _FormScreenState extends State<FormScreen> {
       if (go != true || !mounted) return;
       final page = int.tryParse(pageController.text.trim()) ?? 0;
       if (page < 1) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter a valid page number')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Enter a valid page number',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }
@@ -1297,8 +1318,10 @@ class _FormScreenState extends State<FormScreen> {
         widget.onStatusChanged(response.status);
         await _load();
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Field added')));
+        AppNotice.show(
+          context,
+          const AppNotice(message: 'Field added', kind: NoticeKind.success),
+        );
       } catch (e) {
         if (!mounted) return;
         setState(() => _error = '$e');
@@ -1398,8 +1421,13 @@ class _FormScreenState extends State<FormScreen> {
           context,
           rootNavigator: true,
         ).popUntil((r) => r.isFirst || r is! DialogRoute);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not preview field on page: $e')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not preview field on page.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
         );
       }
     }

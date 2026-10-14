@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart';
@@ -142,10 +144,12 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
         _lastPlacedPt = at;
         _hasPlacedDate = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Signature placed on page $_page.'),
-          action: SnackBarAction(label: 'Undo', onPressed: _undo),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Signature placed on page $_page.',
+          kind: NoticeKind.success,
+          action: NoticeAction(label: 'Undo', onPressed: _undo),
         ),
       );
     } catch (error) {
@@ -214,8 +218,12 @@ class _SignaturePlacementPageState extends State<SignaturePlacementPage> {
         _pagePng = updated;
         _hasPlacedDate = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Date added below signature.')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Date added below signature.',
+          kind: NoticeKind.success,
+        ),
       );
     } catch (error) {
       if (mounted) setState(() => _error = 'Could not add date: $error');

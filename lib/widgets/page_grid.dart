@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'crop_page.dart';
@@ -76,18 +78,26 @@ class _PageGridState extends State<PageGrid> {
         _pageCount = response.status.pageCount;
         _reorderOrder = List<int>.generate(_pageCount, (index) => index + 1);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$label complete.'),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: '$label complete.',
+          kind: NoticeKind.success,
           action: response.status.canUndo.isEmpty
               ? null
-              : SnackBarAction(label: 'Undo', onPressed: _undoLast),
+              : NoticeAction(label: 'Undo', onPressed: _undoLast),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$label failed: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: '$label failed.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -146,8 +156,14 @@ class _PageGridState extends State<PageGrid> {
       }, 'Insert pages');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not insert pages: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not insert pages.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -171,13 +187,22 @@ class _PageGridState extends State<PageGrid> {
         _reorderOrder = List<int>.generate(_pageCount, (index) => index + 1);
         _reordering = false;
       });
-      ScaffoldMessenger.of(
+      AppNotice.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Last page change undone.')));
+        const AppNotice(
+          message: 'Last page change undone.',
+          kind: NoticeKind.success,
+        ),
+      );
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not undo page change: $error')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not undo page change.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
         );
       }
     } finally {
@@ -242,8 +267,12 @@ class _PageGridState extends State<PageGrid> {
         await _openCrop(page);
       case 'delete':
         if (_pageCount <= 1) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('A PDF must keep at least one page.')),
+          AppNotice.show(
+            context,
+            const AppNotice(
+              message: 'A PDF must keep at least one page.',
+              kind: NoticeKind.warning,
+            ),
           );
           return;
         }
@@ -293,8 +322,14 @@ class _PageGridState extends State<PageGrid> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not open crop: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not open crop.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -346,8 +381,14 @@ class _PageGridState extends State<PageGrid> {
       if (mounted) setState(_selectedPages.clear);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not replace pages: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not replace pages.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -375,8 +416,12 @@ class _PageGridState extends State<PageGrid> {
     final pages = _selectedPages.toList()..sort();
     if (pages.isEmpty || _busy) return;
     if (pages.length >= _pageCount) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A PDF must keep at least one page.')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'A PDF must keep at least one page.',
+          kind: NoticeKind.warning,
+        ),
       );
       return;
     }
@@ -422,14 +467,15 @@ class _PageGridState extends State<PageGrid> {
       await saveToolOutputs(context, widget.engine, [
         for (final content in response.contents) content.json,
       ]);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Extracted ${pages.length} selected pages.')),
-      );
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not extract these pages: $error')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not extract these pages.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
         );
       }
     } finally {
@@ -468,10 +514,12 @@ class _PageGridState extends State<PageGrid> {
         _pageCount = response.status.pageCount;
         _reorderOrder = List<int>.generate(_pageCount, (index) => index + 1);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Page moved to position ${newIndex + 1}.'),
-          action: SnackBarAction(label: 'Undo', onPressed: _undoLast),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Page moved to position ${newIndex + 1}.',
+          kind: NoticeKind.info,
+          action: NoticeAction(label: 'Undo', onPressed: _undoLast),
         ),
       );
     } catch (error) {
@@ -479,8 +527,14 @@ class _PageGridState extends State<PageGrid> {
       setState(() {
         _reorderOrder = List<int>.generate(_pageCount, (index) => index + 1);
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not move page: $error')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not move page.',
+          kind: NoticeKind.error,
+          details: '$error',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

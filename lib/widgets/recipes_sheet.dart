@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'output_saver.dart';
@@ -88,8 +90,12 @@ class _RecipesSheetState extends State<RecipesSheet> {
       if (!mounted) return;
       if (values.isEmpty) {
         setState(() => _progress = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No dates were detected in this PDF.')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'No dates were detected in this PDF.',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }
@@ -190,14 +196,15 @@ class _RecipesSheetState extends State<RecipesSheet> {
       }
       if (mounted) {
         setState(() => _progress = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$operations page highlight${operations == 1 ? '' : 's'} added. Undo is available.',
-            ),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message:
+                '$operations page highlight${operations == 1 ? '' : 's'} added. Undo is available.',
+            kind: NoticeKind.success,
             action: operations == 0
                 ? null
-                : SnackBarAction(
+                : NoticeAction(
                     label: 'Undo all',
                     onPressed: () => _undoRecipe(operations),
                   ),
@@ -206,8 +213,13 @@ class _RecipesSheetState extends State<RecipesSheet> {
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not highlight dates: $error')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not highlight dates.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
         );
       }
     } finally {
@@ -236,14 +248,23 @@ class _RecipesSheetState extends State<RecipesSheet> {
       }
       if (status != null) widget.onStatusChanged(status);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Undid $undone highlight changes.')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Undid $undone highlight changes.',
+            kind: NoticeKind.success,
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not undo highlights: $error')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not undo highlights.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
         );
       }
     }
@@ -289,12 +310,13 @@ class _RecipesSheetState extends State<RecipesSheet> {
       final decoded = source == null ? null : jsonDecode(source);
       final count = decoded is Map<String, dynamic> ? decoded['marked'] : null;
       setState(() => _progress = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Marked ${count is int ? count : 'matching'} phone number(s). Review before applying.',
-          ),
-          action: SnackBarAction(
+      AppNotice.show(
+        context,
+        AppNotice(
+          message:
+              'Marked ${count is int ? count : 'matching'} phone number(s). Review before applying.',
+          kind: NoticeKind.info,
+          action: NoticeAction(
             label: 'Review',
             onPressed: () => Navigator.pop(context, 'reviewPhones'),
           ),
@@ -303,8 +325,13 @@ class _RecipesSheetState extends State<RecipesSheet> {
       );
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not mark phone numbers: $error')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Could not mark phone numbers.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
         );
       }
     } finally {

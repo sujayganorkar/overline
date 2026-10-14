@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import 'task_catalog.dart';
 import 'task_workspace.dart';
 
@@ -101,14 +103,23 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
           for (final c in response.contents) c.json,
         ], onOpenDocument: widget.onOpenDocument);
       }
-      if (!mounted) return;
-      ScaffoldMessenger.of(
+      if (!mounted || collectOutputs) return;
+      AppNotice.show(
         context,
-      ).showSnackBar(SnackBar(content: Text('${_actionName(tool)} complete.')));
+        AppNotice(
+          message: '${_actionName(tool)} complete.',
+          kind: NoticeKind.success,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not ${_actionName(tool)}: $e')),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not ${_actionName(tool)}.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -166,9 +177,11 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       }
       if (items.length < 2) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Choose at least one more PDF to combine.'),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Choose at least one more PDF to combine.',
+            kind: NoticeKind.warning,
           ),
         );
         return;
@@ -203,8 +216,14 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Combine failed: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Combine failed.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -263,8 +282,13 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not create PDF from photos: $error')),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not create PDF from photos.',
+          kind: NoticeKind.error,
+          details: '$error',
+        ),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -303,9 +327,13 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       if (text == null || !mounted) return;
       final pages = int.tryParse(text.trim());
       if (pages == null || pages < 1 || pages > 100) {
-        ScaffoldMessenger.of(
+        AppNotice.show(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Enter 1 to 100 pages.')));
+          const AppNotice(
+            message: 'Enter 1 to 100 pages.',
+            kind: NoticeKind.warning,
+          ),
+        );
         return;
       }
       await _run(
@@ -378,8 +406,12 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       if (go != true || !mounted) return;
       final value = double.tryParse(controller.text.trim());
       if (value == null || value <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter a positive number')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Enter a positive number',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }
@@ -557,8 +589,12 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       final headerText = header.text.trim();
       final footerText = footer.text.trim();
       if (headerText.isEmpty && footerText.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter a header, a footer, or both.')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Enter a header, a footer, or both.',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }

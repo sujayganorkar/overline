@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../services/pdf_engine.dart';
 import 'delivery_hub_sheet.dart';
 
@@ -135,8 +137,13 @@ Future<void> saveOutputPaths(
       );
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open ${path.split('/').last}: $e')),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not open ${path.split('/').last}.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
       );
       return;
     }

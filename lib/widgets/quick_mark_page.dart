@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart';
@@ -173,10 +175,12 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
         _png = updated;
         _draftImagePosition = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Placed $_datePreview on page $_page.'),
-          action: SnackBarAction(label: 'Undo', onPressed: _undoPlacement),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Placed $_datePreview on page $_page.',
+          kind: NoticeKind.success,
+          action: NoticeAction(label: 'Undo', onPressed: _undoPlacement),
         ),
       );
     } catch (error) {

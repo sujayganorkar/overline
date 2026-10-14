@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 
@@ -128,8 +130,14 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       await _reload();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$tool failed: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not update bookmarks.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -186,8 +194,14 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       await _reload();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('No headings found: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not create bookmarks from headings.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

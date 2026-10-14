@@ -7,6 +7,8 @@ import 'dart:ui' as ui;
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart' as geo;
@@ -908,8 +910,10 @@ class _AnnotatePageState extends State<AnnotatePage> {
       ],
     }, tool: tool);
     if (response != null && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(_measureSummary(response))));
+      AppNotice.show(
+        context,
+        AppNotice(message: _measureSummary(response), kind: NoticeKind.info),
+      );
       setState(() => _measurePoints.clear());
     }
   }
@@ -996,15 +1000,15 @@ class _AnnotatePageState extends State<AnnotatePage> {
         _selectionExtentLine = null;
         _appliedCount++;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _appliedCount == 1
-                ? 'Annotation applied. Add more or tap Done when finished.'
-                : 'Annotation $_appliedCount applied.',
-          ),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: _appliedCount == 1
+              ? 'Annotation applied. Add more or tap Done when finished.'
+              : 'Annotation $_appliedCount applied.',
+          kind: NoticeKind.success,
           duration: const Duration(seconds: 3),
-          action: SnackBarAction(label: 'Undo', onPressed: _undoLastAnnotation),
+          action: NoticeAction(label: 'Undo', onPressed: _undoLastAnnotation),
         ),
       );
     } catch (e) {
@@ -1046,9 +1050,11 @@ class _AnnotatePageState extends State<AnnotatePage> {
         _baseImage = newImage;
         _appliedCount--;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Annotation undone.'),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Annotation undone.',
+          kind: NoticeKind.success,
           duration: Duration(seconds: 2),
         ),
       );

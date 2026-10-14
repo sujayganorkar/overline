@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import 'task_catalog.dart';
 import 'task_workspace.dart';
 
@@ -104,13 +106,20 @@ class _SecureSheetState extends State<SecureSheet> {
         'doc_flatten' => 'Fields and comments flattened.',
         _ => 'Change applied.',
       };
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
+      AppNotice.show(
+        context,
+        AppNotice(message: message, kind: NoticeKind.success),
+      );
       if (closeAfterSuccess && mounted) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not complete that security action: $e')),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not complete that security action.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -217,8 +226,12 @@ class _SecureSheetState extends State<SecureSheet> {
       );
       if (go != true || !mounted) return;
       if (open.text.isEmpty && owner.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter at least one password')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Enter at least one password',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }
@@ -319,17 +332,23 @@ class _SecureSheetState extends State<SecureSheet> {
       if (!mounted) return;
       widget.onStatusChanged(r2.status);
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Document sanitized! Metadata removed & layers sealed.',
-          ),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Hidden information removed and fields flattened. Save to keep these changes.',
+          kind: NoticeKind.success,
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Sanitization failed: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Sanitization failed.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }

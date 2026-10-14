@@ -5,6 +5,9 @@ import 'dart:math' as math;
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+
+import 'widgets/app_notice.dart';
+
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -49,6 +52,7 @@ class PdfCraftApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'PdfCraft Mobile',
+      navigatorObservers: [NoticeNavigatorObserver()],
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -125,7 +129,6 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   bool _launchingTask = false;
   Offset? _doubleTapPosition;
   bool _swipeStartedAtFit = false;
-  static bool _coachShown = false;
   final TransformationController _viewerTransform = TransformationController();
   final GlobalKey _viewerPageKey = GlobalKey();
   int _viewerPointerCount = 0;
@@ -140,6 +143,15 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _initEngine();
     _loadRecents();
+  }
+
+  void _reportError(String message, Object error) {
+    if (!mounted) return;
+    setState(() => _status = message);
+    AppNotice.show(
+      context,
+      AppNotice(message: message, kind: NoticeKind.error, details: '$error'),
+    );
   }
 
   Future<void> _loadRecents() async {
@@ -159,7 +171,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       _setupNativeChannels();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Engine init failed: $e');
+      _reportError('Engine init failed.', e);
     }
   }
 
@@ -205,6 +217,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _openDocumentBytes(String name, Uint8List bytes) async {
+    AppNotice.dismiss(context);
     if (!await _confirmReplacingCurrent()) return;
     setState(() {
       _busy = true;
@@ -261,7 +274,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         }
       }
       if (!mounted) return;
-      setState(() => _status = 'Open failed: $e');
+      _reportError('Open failed.', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -280,7 +293,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       await _openDocumentBytes(file.name, fileBytes);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Open failed: $e');
+      _reportError('Open failed.', e);
     }
   }
 
@@ -291,8 +304,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       await _recentStore.removeRecent(entry.name);
       await _loadRecents();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File is no longer available.')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'File is no longer available.',
+            kind: NoticeKind.warning,
+          ),
         );
       }
       return;
@@ -413,7 +430,6 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       );
       final pageSize = await engine.pageSize(handle: doc, page1Based: page);
       if (!mounted || _doc != doc || _page != page) return;
-      final firstRender = _png == null;
       setState(() {
         _png = png;
         _imageWidthPx = pageSize.width * 96 / 72;
@@ -423,21 +439,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         _pageTextLoading = true;
         _status = 'Ready';
       });
-      if (firstRender && !_coachShown) {
-        _coachShown = true;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Hold text to select it · Swipe to turn pages · Pinch to zoom',
-            ),
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
       await _refreshMarkers(engine, doc, page, pageSize: pageSize);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Render failed: $e');
+      _reportError('Render failed.', e);
       _png = null;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -567,8 +572,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       if (entered == null || !mounted) return;
       final page = int.tryParse(entered.trim());
       if (page == null || page < 1 || page > _pageCount) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Enter a page from 1 to $_pageCount.')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Enter a page from 1 to $_pageCount.',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }
@@ -617,14 +626,22 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     if (_busy || _viewerPointerCount > 1) return;
     _viewerLongPressSelecting = true;
     if (_pageTextLoading) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Getting this page’s text ready…')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Getting this page’s text ready…',
+          kind: NoticeKind.info,
+        ),
       );
       return;
     }
     if (_pageTextLines.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This page has no selectable text.')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'This page has no selectable text.',
+          kind: NoticeKind.warning,
+        ),
       );
       return;
     }
@@ -701,15 +718,24 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       for (var index = start; index <= end; index++) _pageTextLines[index].text,
     ].join('\n').trim();
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('These lines hold no copyable text.')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'These lines hold no copyable text.',
+          kind: NoticeKind.warning,
+        ),
       );
       return;
     }
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Selected text copied.')));
+    AppNotice.show(
+      context,
+      const AppNotice(
+        message: 'Selected text copied.',
+        kind: NoticeKind.success,
+      ),
+    );
   }
 
   Future<void> _applyTextSelection({String? kind, String? color}) async {
@@ -763,17 +789,18 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         'strikeout' => 'Struck out',
         _ => 'Marked',
       };
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '$kindLabel ${quads.length} selected line${quads.length == 1 ? '' : 's'}.',
-          ),
-          action: SnackBarAction(label: 'Undo', onPressed: _undo),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message:
+              '$kindLabel ${quads.length} selected line${quads.length == 1 ? '' : 's'}.',
+          kind: NoticeKind.info,
+          action: NoticeAction(label: 'Undo', onPressed: _undo),
         ),
       );
     } catch (error) {
       if (mounted) {
-        setState(() => _status = 'Could not mark selected text: $error');
+        _reportError('Could not mark selected text.', error);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -838,8 +865,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
           _recoveryAvailable = false;
           _status = 'Saved $safeName through Files';
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved $safeName through Files')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Saved $safeName through Files',
+            kind: NoticeKind.success,
+          ),
         );
       }
     } catch (e) {
@@ -851,10 +882,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         }
       }
       if (!mounted) return;
-      setState(
-        () => _status = externalSaved
-            ? 'File was written, but engine save state failed: $e'
-            : 'Save failed: $e',
+      _reportError(
+        externalSaved
+            ? 'Your file was saved, but the editing session could not confirm it. Keep the saved copy.'
+            : 'Could not save the PDF. Your changes are still open.',
+        e,
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -894,7 +926,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       );
       if (mounted) setState(() => _status = 'Share sheet opened');
     } catch (error) {
-      if (mounted) setState(() => _status = 'Share failed: $error');
+      if (mounted) _reportError('Share failed.', error);
     } finally {
       if (snapshot != null) {
         try {
@@ -1052,7 +1084,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       await _render();
     } catch (error) {
       if (mounted) {
-        setState(() => _status = 'Could not restore recovery copy: $error');
+        _reportError('Could not restore recovery copy.', error);
       }
     }
   }
@@ -1070,6 +1102,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   void _onOperationStatus(bridge.DocumentStatus status) {
     if (!mounted) return;
+    AppNotice.dismissAction(context);
     setState(() {
       _pageCount = status.pageCount;
       _dirty = status.dirty || _recoveredUnsaved;
@@ -1099,7 +1132,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       _onOperationStatus(response.status);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Undo failed: $e');
+      _reportError('Undo failed.', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1125,14 +1158,16 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       if (status != null) _onOperationStatus(status);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Undid $undone change${undone == 1 ? '' : 's'}.'),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Undid $undone change${undone == 1 ? '' : 's'}.',
+          kind: NoticeKind.success,
         ),
       );
     } catch (error) {
       if (mounted) {
-        setState(() => _status = 'Undo failed: $error');
+        _reportError('Undo failed.', error);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1154,7 +1189,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       _onOperationStatus(response.status);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Redo failed: $e');
+      _reportError('Redo failed.', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1192,7 +1227,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       if (status != null) _onOperationStatus(status);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Annotate failed: $e');
+      _reportError('Annotate failed.', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1257,9 +1292,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       if (!mounted) return WorkflowOutcome.cancelled;
       final phrase = controller.text.trim();
       if (phrase.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Enter the words you want to highlight.'),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Enter the words you want to highlight.',
+            kind: NoticeKind.warning,
           ),
         );
         return WorkflowOutcome.cancelled;
@@ -1324,8 +1361,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             .toList();
         if (visibleMatches.isEmpty) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No matches found in this PDF.')),
+            AppNotice.show(
+              context,
+              const AppNotice(
+                message: 'No matches found in this PDF.',
+                kind: NoticeKind.warning,
+              ),
             );
           }
           return WorkflowOutcome.cancelled;
@@ -1391,12 +1432,13 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         }
         if (!mounted) return WorkflowOutcome.completed;
         if (latestStatus != null) _onOperationStatus(latestStatus);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Highlighted $matchCount match${matchCount == 1 ? '' : 'es'}${entireDocument ? ' across ${matchingPages.length} pages' : ' on page $_page'}.',
-            ),
-            action: SnackBarAction(
+        AppNotice.show(
+          context,
+          AppNotice(
+            message:
+                'Highlighted $matchCount match${matchCount == 1 ? '' : 'es'}${entireDocument ? ' across ${matchingPages.length} pages' : ' on page $_page'}.',
+            kind: NoticeKind.info,
+            action: NoticeAction(
               label: 'Undo',
               onPressed: () => _undoRecentEdits(matchingPages.length),
             ),
@@ -1406,7 +1448,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       } catch (e) {
         if (!mounted) return WorkflowOutcome.failed;
         if (latestStatus != null) _onOperationStatus(latestStatus);
-        setState(() => _status = 'Highlight failed: $e');
+        _reportError('Highlight failed.', e);
         return WorkflowOutcome.failed;
       } finally {
         if (mounted) setState(() => _busy = false);
@@ -1620,7 +1662,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             : WorkflowOutcome.cancelled;
       } catch (e) {
         if (!mounted) return WorkflowOutcome.failed;
-        setState(() => _status = 'Signature failed: $e');
+        _reportError('Signature failed.', e);
         return WorkflowOutcome.failed;
       } finally {
         if (mounted) setState(() => _busy = false);
@@ -1666,7 +1708,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             : WorkflowOutcome.cancelled;
       } catch (e) {
         if (!mounted) return WorkflowOutcome.failed;
-        setState(() => _status = 'Signature failed: $e');
+        _reportError('Signature failed.', e);
         return WorkflowOutcome.failed;
       } finally {
         if (mounted) setState(() => _busy = false);
@@ -1963,6 +2005,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _showTools() async {
+    AppNotice.dismiss(context);
     if (_busy || _launchingTask || _engine == null) return;
     final task = await showModalBottomSheet<PdfTask>(
       context: context,
@@ -2047,6 +2090,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   }
 
   Future<void> _goHome() async {
+    AppNotice.dismiss(context);
     if (_busy || _launchingTask) return;
     if (_finding) {
       setState(() => _finding = false);
@@ -2169,14 +2213,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         return;
     }
     if (!mounted) return;
-    if (outcome == WorkflowOutcome.completed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Done — ${_agentTaskLabel(request)}.')),
-      );
-    } else if (outcome == WorkflowOutcome.failed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not complete ${_agentTaskLabel(request)}.'),
+    if (outcome == WorkflowOutcome.failed) {
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not complete ${_agentTaskLabel(request)}.',
+          kind: NoticeKind.error,
         ),
       );
     }
@@ -3087,9 +3129,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                 ),
               ),
             ],
-            if (_busy ||
-                _status.contains('failed') ||
-                _status.startsWith('Could not'))
+            if (_busy)
               Padding(
                 padding: const EdgeInsets.all(8),
                 child: Semantics(liveRegion: true, child: Text(_status)),
@@ -3135,9 +3175,13 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       if (text == null || !mounted) return;
       pages = int.tryParse(text.trim());
       if (pages == null || pages < 1 || pages > 100) {
-        ScaffoldMessenger.of(
+        AppNotice.show(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Enter 1 to 100 pages.')));
+          const AppNotice(
+            message: 'Enter 1 to 100 pages.',
+            kind: NoticeKind.warning,
+          ),
+        );
         return;
       }
     } finally {
@@ -3164,7 +3208,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = 'Could not create a blank PDF: $e');
+      _reportError('Could not create a blank PDF.', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

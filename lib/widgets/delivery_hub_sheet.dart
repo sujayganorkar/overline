@@ -2,6 +2,9 @@ import 'dart:typed_data';
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+
+import 'app_notice.dart';
+
 import 'package:share_plus/share_plus.dart';
 
 import 'output_saver.dart';
@@ -86,8 +89,14 @@ class _DeliveryHubSheetState extends State<DeliveryHubSheet> {
       );
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Sharing failed: $e')));
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Sharing failed.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _working = false);
@@ -105,18 +114,24 @@ class _DeliveryHubSheetState extends State<DeliveryHubSheet> {
         fileName: widget.suggestedFileName,
         bytes: widget.bytes,
         mimeType: mimeTypeFor(widget.suggestedFileName),
-        dialogTitle: 'Save $widget.suggestedFileName',
+        dialogTitle: 'Save ${widget.suggestedFileName}',
       );
       if (!context.mounted) return;
       setState(
         () => _message = uri == null
-            ? 'Save canceled. Your file is still ready.'
+            ? null
             : 'Saved ${widget.suggestedFileName} to device',
       );
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Save failed: $e')));
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Save failed.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _working = false);

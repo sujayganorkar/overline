@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'page_viewport.dart';
@@ -145,8 +147,12 @@ class _TextEditSheetState extends State<TextEditSheet> {
       }
     }
     if (closest == null || closestDistanceSquared > 42 * 42) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tap near a line of text to select it.')),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message: 'Tap near a line of text to select it.',
+          kind: NoticeKind.warning,
+        ),
       );
       return;
     }
@@ -227,8 +233,14 @@ class _TextEditSheetState extends State<TextEditSheet> {
         Navigator.pop(context);
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Edit failed: $e')));
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Edit failed.',
+            kind: NoticeKind.error,
+            details: '$e',
+          ),
+        );
       } finally {
         if (mounted) setState(() => _busy = false);
       }

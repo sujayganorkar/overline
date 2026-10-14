@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import 'task_catalog.dart';
 import 'task_workspace.dart';
 
@@ -110,8 +112,14 @@ class _ExportSheetState extends State<ExportSheet> {
       return response;
     } catch (e) {
       if (!mounted) return null;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$tool failed: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Could not complete this PDF task.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
       return null;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -372,8 +380,14 @@ class _ExportSheetState extends State<ExportSheet> {
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Batch OCR failed: $error')));
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Batch OCR failed.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -449,19 +463,25 @@ class _ExportSheetState extends State<ExportSheet> {
       } else if (next == 'mark') {
         final marked = await _run('doc_compare_mark', {'other': staged});
         if (marked != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Differences marked as comments. Undo is available.',
-              ),
+          AppNotice.show(
+            context,
+            const AppNotice(
+              message: 'Differences marked as comments. Undo is available.',
+              kind: NoticeKind.info,
             ),
           );
         }
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Compare failed: $e')));
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Compare failed.',
+          kind: NoticeKind.error,
+          details: '$e',
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -479,11 +499,12 @@ class _ExportSheetState extends State<ExportSheet> {
     final data = source == null ? null : jsonDecode(source);
     final count = data is Map<String, dynamic> ? data['count'] : null;
     if (count == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No saved measurements yet — measure in Draw & annotate first.',
-          ),
+      AppNotice.show(
+        context,
+        const AppNotice(
+          message:
+              'No saved measurements yet — measure in Draw & annotate first.',
+          kind: NoticeKind.warning,
         ),
       );
       return;
@@ -797,19 +818,24 @@ class _ExportSheetState extends State<ExportSheet> {
           : (targetValue * 1024 * 1024).floor();
 
       if (targetBytes <= 0 || (targetUnit == 'MB' && targetValue > 10240)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter a valid target size.')),
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'Please enter a valid target size.',
+            kind: NoticeKind.warning,
+          ),
         );
         return;
       }
 
       if (original.length <= targetBytes) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'This PDF is already ${_formatFileSize(original.length)}, which is below your target ($targetLabel).',
-              ),
+          AppNotice.show(
+            context,
+            AppNotice(
+              message:
+                  'This PDF is already ${_formatFileSize(original.length)}, which is below your target ($targetLabel).',
+              kind: NoticeKind.info,
             ),
           );
         }
@@ -905,8 +931,14 @@ class _ExportSheetState extends State<ExportSheet> {
           );
         } catch (e) {
           if (mounted) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text('Sharing failed: $e')));
+            AppNotice.show(
+              context,
+              AppNotice(
+                message: 'Sharing failed.',
+                kind: NoticeKind.error,
+                details: '$e',
+              ),
+            );
           }
         }
       } else if (outcome == 'save') {
@@ -916,21 +948,24 @@ class _ExportSheetState extends State<ExportSheet> {
           mimeType: 'application/pdf',
           dialogTitle: 'Save compressed PDF',
         );
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              uri == null
-                  ? 'Save cancelled'
-                  : 'Compressed copy saved through Files',
-            ),
+        if (!mounted || uri == null) return;
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Compressed copy saved through Files',
+            kind: NoticeKind.success,
           ),
         );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Target-size compression failed: $error')),
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Target-size compression failed.',
+            kind: NoticeKind.error,
+            details: '$error',
+          ),
         );
       }
     } finally {
@@ -1003,9 +1038,12 @@ class _ExportSheetState extends State<ExportSheet> {
                 });
               } catch (error) {
                 if (dialogContext.mounted) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(
-                      content: Text('Could not preview page $nextPage: $error'),
+                  AppNotice.show(
+                    dialogContext,
+                    AppNotice(
+                      message: 'Could not preview page $nextPage.',
+                      kind: NoticeKind.error,
+                      details: '$error',
                     ),
                   );
                 }

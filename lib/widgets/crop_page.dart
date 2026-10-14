@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'app_notice.dart';
+
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart';
@@ -122,10 +124,12 @@ class _CropPageState extends State<CropPage> {
       widget.onStatusChanged(response.status);
       await _loadPage(_page);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Page cropped.'),
-          action: SnackBarAction(label: 'Undo', onPressed: () => _undo()),
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Page cropped.',
+          kind: NoticeKind.info,
+          action: NoticeAction(label: 'Undo', onPressed: () => _undo()),
         ),
       );
     } catch (error) {
