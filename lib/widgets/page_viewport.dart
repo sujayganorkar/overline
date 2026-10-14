@@ -19,20 +19,21 @@ double fitPageScale({
   return math.min(viewportWidth / pageWidth, viewportHeight / pageHeight);
 }
 
-/// Turn the page with a deliberate one-finger swipe while at fit scale.
+/// Turn the page with a deliberate one-finger horizontal swipe while at fit scale.
 /// At zoom, null leaves the gesture to InteractiveViewer for panning.
+/// Vertical gestures are strictly ignored to prevent accidental page turns during reading.
 int? pageForSwipe(
   Offset delta, {
   required int currentPage,
   required int pageCount,
   required double scale,
-  double threshold = 56,
+  double threshold = 64,
 }) {
-  if (scale > 1.02) return null;
-  final horizontal = delta.dx.abs() > delta.dy.abs();
-  final distance = horizontal ? delta.dx.abs() : delta.dy.abs();
-  if (distance < threshold) return null;
-  final next = horizontal ? delta.dx < 0 : delta.dy < 0;
+  if (scale > 1.05) return null;
+  final isHorizontal = delta.dx.abs() > (delta.dy.abs() * 1.5);
+  if (!isHorizontal) return null;
+  if (delta.dx.abs() < threshold) return null;
+  final next = delta.dx < 0;
   final destination = currentPage + (next ? 1 : -1);
   return destination < 1 || destination > pageCount ? null : destination;
 }

@@ -21,6 +21,8 @@ class OrganizeSheet extends StatefulWidget {
     this.documentName,
     this.onOpenPages,
     required this.onStatusChanged,
+    this.initialAction,
+    this.onOpenDocument,
   });
 
   final PdfEngineApi engine;
@@ -30,6 +32,8 @@ class OrganizeSheet extends StatefulWidget {
   final String? documentName;
   final Future<void> Function()? onOpenPages;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
+  final String? initialAction;
+  final void Function(Uint8List bytes, String name)? onOpenDocument;
 
   @override
   State<OrganizeSheet> createState() => _OrganizeSheetState();
@@ -37,6 +41,20 @@ class OrganizeSheet extends StatefulWidget {
 
 class _OrganizeSheetState extends State<OrganizeSheet> {
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialAction == 'combine') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _combine();
+      });
+    } else if (widget.initialAction == 'images') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _createFromImages();
+      });
+    }
+  }
 
   Future<void> _run(
     String tool,
@@ -57,9 +75,12 @@ class _OrganizeSheetState extends State<OrganizeSheet> {
       // echo the document's own staging path, which must never be offered
       // as if it were a result.
       if (collectOutputs) {
-        await saveToolOutputs(context, widget.engine, [
-          for (final c in response.contents) c.json,
-        ]);
+        await saveToolOutputs(
+          context,
+          widget.engine,
+          [for (final c in response.contents) c.json],
+          onOpenDocument: widget.onOpenDocument,
+        );
       }
       if (!mounted) return;
       ScaffoldMessenger.of(

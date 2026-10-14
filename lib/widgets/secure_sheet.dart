@@ -251,6 +251,59 @@ class _SecureSheetState extends State<SecureSheet> {
     );
   }
 
+  Future<void> _oneTapSanitize() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sanitize & Clean Document?'),
+        content: const Text(
+          'This will permanently remove hidden metadata (author, device, history), strip sensitive tags, and flatten interactive layers to prevent data leaks before emailing or uploading.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sanitize now'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      // 1. Remove hidden info & metadata
+      await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'doc_remove_hidden',
+        argumentsJson: '{}',
+      );
+      // 2. Flatten layers
+      final r2 = await widget.engine.executeTool(
+        handle: widget.handle,
+        tool: 'doc_flatten',
+        argumentsJson: jsonEncode({'comments': true, 'fields': true}),
+      );
+      if (!mounted) return;
+      widget.onStatusChanged(r2.status);
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Document sanitized! Metadata removed & layers sealed.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sanitization failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Widget _section(String label) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
     child: Text(label, style: Theme.of(context).textTheme.labelLarge),
@@ -258,6 +311,7 @@ class _SecureSheetState extends State<SecureSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return SafeArea(
       child: SingleChildScrollView(
         child: Padding(
@@ -269,12 +323,80 @@ class _SecureSheetState extends State<SecureSheet> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
-                  'Redact & secure',
-                  style: Theme.of(context).textTheme.titleLarge,
+                  'Protect & Redact',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
               if (_busy) const LinearProgressIndicator(),
+
+              // Hero 1-Tap Privacy Clean Card
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Card(
+                  elevation: 0,
+                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.25),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(
+                      color: theme.colorScheme.error.withValues(alpha: 0.35),
+                      width: 1,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.error.withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.shield_outlined,
+                                color: theme.colorScheme.error,
+                                size: 18,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              '1-Tap Privacy Sanitize',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Wipes hidden metadata (author, device, edit history, GPS) and flattens fields to seal the document against leaks before sharing.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.tonalIcon(
+                            icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                            label: const Text('Sanitize document now'),
+                            onPressed: _busy ? null : _oneTapSanitize,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
               _section('Redact'),
               ListTile(
                 leading: const Icon(Icons.visibility_off_outlined),

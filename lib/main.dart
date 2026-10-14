@@ -684,7 +684,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         .showSnackBar(const SnackBar(content: Text('Selected text copied.')));
   }
 
-  Future<void> _applyTextSelection() async {
+  Future<void> _applyTextSelection({String? kind, String? color}) async {
+    if (kind != null) _textSelectionKind = kind;
+    if (color != null) _textSelectionColor = color;
     final anchor = _textSelectionAnchor;
     final extent = _textSelectionExtent;
     final engine = _engine;
@@ -727,10 +729,16 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         _textSelectionExtent = null;
       });
       _onOperationStatus(response.status);
+      final kindLabel = switch (_textSelectionKind) {
+        'highlight' => 'Highlighted',
+        'underline' => 'Underlined',
+        'strikeout' => 'Struck out',
+        _ => 'Marked',
+      };
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Marked ${quads.length} selected line${quads.length == 1 ? '' : 's'}.',
+            '$kindLabel ${quads.length} selected line${quads.length == 1 ? '' : 's'}.',
           ),
           action: SnackBarAction(label: 'Undo', onPressed: _undo),
         ),
@@ -2448,9 +2456,18 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                             72 *
                             fitScale;
                         final y = rect[3] * 96 / 72 * fitScale;
+                        final currentScale =
+                            _viewerTransform.value.getMaxScaleOnAxis();
+                        final invScale =
+                            (1.0 / (currentScale > 0.05 ? currentScale : 1.0))
+                                .clamp(0.25, 1.0);
+                        final handleSize = 48.0 * invScale;
+                        final dotSize = 18.0 * invScale;
+                        final borderWidth = 2.0 * invScale;
+                        final halfHandle = handleSize / 2;
                         return Positioned(
-                          left: x - 24,
-                          top: y - 24,
+                          left: x - halfHandle,
+                          top: y - halfHandle,
                           child: Semantics(
                             label: anchor
                                 ? 'Start text selection handle, line ${index + 1}'
@@ -2471,12 +2488,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                               onPanEnd: (_) =>
                                   _viewerLongPressSelecting = false,
                               child: SizedBox(
-                                width: 48,
-                                height: 48,
+                                width: handleSize,
+                                height: handleSize,
                                 child: Center(
                                   child: Container(
-                                    width: 18,
-                                    height: 18,
+                                    width: dotSize,
+                                    height: dotSize,
                                     decoration: BoxDecoration(
                                       color: Theme.of(context)
                                           .colorScheme
@@ -2484,7 +2501,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                       shape: BoxShape.circle,
                                       border: Border.all(
                                         color: Colors.white,
-                                        width: 2,
+                                        width: borderWidth,
                                       ),
                                       boxShadow: const [
                                         BoxShadow(
@@ -2516,6 +2533,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                               transformationController: _viewerTransform,
                               minScale: 1,
                               maxScale: 8,
+                              boundaryMargin: const EdgeInsets.symmetric(
+                                horizontal: 48,
+                                vertical: 48,
+                              ),
                               clipBehavior: Clip.none,
                               child: Center(
                                 child: SizedBox(
@@ -2531,23 +2552,37 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                         _viewerTransform.value =
                                             Matrix4.identity();
                                       } else {
-                                        const targetScale = 2.0;
+                                        const targetScale = 2.5;
                                         final focal = details.localPosition;
                                         final pageOriginX =
-                                            (constraints.maxWidth - pageWidth) / 2;
+                                            (constraints.maxWidth - pageWidth) /
+                                                2;
                                         final pageOriginY =
-                                            (constraints.maxHeight - pageHeight) / 2;
-                                        final screenFocalX =
-                                            pageOriginX + focal.dx;
-                                        final screenFocalY =
-                                            pageOriginY + focal.dy;
-                                        final dx = constraints.maxWidth / 2 -
-                                            screenFocalX * targetScale;
-                                        final dy = constraints.maxHeight / 2 -
-                                            screenFocalY * targetScale;
-                                        _viewerTransform.value = Matrix4.identity()
-                                          ..translate(dx, dy)
-                                          ..scale(targetScale);
+                                            (constraints.maxHeight -
+                                                    pageHeight) /
+                                                2;
+                                        final cx = pageOriginX + focal.dx;
+                                        final cy = pageOriginY + focal.dy;
+                                        final rawDx =
+                                            (constraints.maxWidth / 2) -
+                                                (cx * targetScale);
+                                        final rawDy =
+                                            (constraints.maxHeight / 2) -
+                                                (cy * targetScale);
+                                        final minDx =
+                                            constraints.maxWidth *
+                                                (1 - targetScale);
+                                        final minDy =
+                                            constraints.maxHeight *
+                                                (1 - targetScale);
+                                        final clampedDx =
+                                            rawDx.clamp(minDx, 0.0);
+                                        final clampedDy =
+                                            rawDy.clamp(minDy, 0.0);
+                                        _viewerTransform.value =
+                                            Matrix4.identity()
+                                              ..translate(clampedDx, clampedDy)
+                                              ..scale(targetScale, targetScale);
                                       }
                                     },
                                     onDoubleTap: () {},
@@ -2850,129 +2885,203 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                               ),
                             ),
 
-                          // Floating Overlay: Text selection styling deck
+                          // Floating Overlay: Compact Quick Action Floating Bar
                           if (_textSelectionAnchor != null &&
                               _textSelectionExtent != null)
                             Positioned(
                               left: 16,
                               right: 16,
                               bottom: 16,
-                              child: Material(
-                                elevation: 6,
-                                shadowColor: Colors.black26,
-                                borderRadius: BorderRadius.circular(16),
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surface
-                                    .withValues(alpha: 0.96),
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    8,
-                                    14,
-                                    10,
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              '$selectedLineCount ${selectedLineCount == 1 ? 'line' : 'lines'} selected',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleSmall,
+                              child: Center(
+                                child: Material(
+                                  elevation: 8,
+                                  shadowColor: Colors.black38,
+                                  borderRadius: BorderRadius.circular(28),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest
+                                      .withValues(alpha: 0.98),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        // Highlight button (1-tap instant action)
+                                        Tooltip(
+                                          message:
+                                              'Highlight ($selectedLineCount lines)',
+                                          child: InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                            onTap: _busy
+                                                ? null
+                                                : () => _applyTextSelection(
+                                                    kind: 'highlight',
+                                                  ),
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 8,
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.border_color_outlined,
+                                                    size: 19,
+                                                    color:
+                                                        _selectionColorForName(
+                                                      _textSelectionColor,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  const Text(
+                                                    'Highlight',
+                                                    style: TextStyle(
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
-                                          IconButton(
-                                            tooltip: 'Copy selected text',
-                                            onPressed: _copyTextSelection,
-                                            icon: const Icon(Icons.copy_outlined),
+                                        ),
+                                        // Color cycle picker dot
+                                        PopupMenuButton<String>(
+                                          tooltip: 'Change highlight color',
+                                          initialValue: _textSelectionColor,
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                            minWidth: 40,
                                           ),
-                                          IconButton(
-                                            tooltip: 'Clear selection',
-                                            onPressed: () => setState(() {
-                                              _textSelectionAnchor = null;
-                                              _textSelectionExtent = null;
-                                            }),
-                                            icon: const Icon(Icons.close),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      SegmentedButton<String>(
-                                        segments: const [
-                                          ButtonSegment(
-                                            value: 'highlight',
-                                            label: Text('Highlight'),
-                                          ),
-                                          ButtonSegment(
-                                            value: 'underline',
-                                            label: Text('Underline'),
-                                          ),
-                                          ButtonSegment(
-                                            value: 'strikeout',
-                                            label: Text('Strike'),
-                                          ),
-                                        ],
-                                        selected: {_textSelectionKind},
-                                        onSelectionChanged: (values) =>
-                                            setState(
-                                              () =>
-                                                  _textSelectionKind =
-                                                      values.first,
+                                          icon: Container(
+                                            width: 16,
+                                            height: 16,
+                                            decoration: BoxDecoration(
+                                              color: _selectionColorForName(
+                                                _textSelectionColor,
+                                              ),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: Colors.white,
+                                                width: 1.5,
+                                              ),
                                             ),
-                                      ),
-                                      if (_textSelectionKind == 'highlight') ...[
-                                        const SizedBox(height: 6),
-                                        Wrap(
-                                          alignment: WrapAlignment.center,
-                                          spacing: 6,
-                                          children: [
-                                            for (final color in const [
+                                          ),
+                                          onSelected: (color) => setState(
+                                            () => _textSelectionColor = color,
+                                          ),
+                                          itemBuilder: (context) => [
+                                            for (final c in const [
                                               'yellow',
                                               'green',
                                               'blue',
                                               'red',
                                             ])
-                                              ChoiceChip(
-                                                avatar: CircleAvatar(
-                                                  radius: 8,
-                                                  backgroundColor:
-                                                      _selectionColorForName(
-                                                        color,
+                                              PopupMenuItem(
+                                                value: c,
+                                                child: Row(
+                                                  children: [
+                                                    Container(
+                                                      width: 16,
+                                                      height: 16,
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            _selectionColorForName(
+                                                          c,
+                                                        ),
+                                                        shape: BoxShape.circle,
                                                       ),
-                                                ),
-                                                label: Text(
-                                                  color[0].toUpperCase() +
-                                                      color.substring(1),
-                                                ),
-                                                selected:
-                                                    _textSelectionColor ==
-                                                    color,
-                                                onSelected: (_) => setState(
-                                                  () =>
-                                                      _textSelectionColor =
-                                                          color,
+                                                    ),
+                                                    const SizedBox(width: 10),
+                                                    Text(
+                                                      c[0].toUpperCase() +
+                                                          c.substring(1),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                           ],
                                         ),
-                                      ],
-                                      const SizedBox(height: 8),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        child: FilledButton(
+                                        Container(
+                                          height: 24,
+                                          width: 1,
+                                          margin: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .outlineVariant,
+                                        ),
+                                        // Underline button
+                                        IconButton(
+                                          tooltip: 'Underline',
+                                          iconSize: 20,
+                                          padding: const EdgeInsets.all(8),
+                                          constraints: const BoxConstraints(),
                                           onPressed: _busy
                                               ? null
-                                              : _applyTextSelection,
-                                          child: Text(
-                                            'Apply ${_textSelectionKind == 'strikeout' ? 'strikeout' : _textSelectionKind}',
+                                              : () => _applyTextSelection(
+                                                  kind: 'underline',
+                                                ),
+                                          icon: const Icon(
+                                            Icons.format_underlined,
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                        // Strikeout button
+                                        IconButton(
+                                          tooltip: 'Strikethrough',
+                                          iconSize: 20,
+                                          padding: const EdgeInsets.all(8),
+                                          constraints: const BoxConstraints(),
+                                          onPressed: _busy
+                                              ? null
+                                              : () => _applyTextSelection(
+                                                  kind: 'strikeout',
+                                                ),
+                                          icon: const Icon(
+                                            Icons.format_strikethrough,
+                                          ),
+                                        ),
+                                        // Copy button
+                                        IconButton(
+                                          tooltip: 'Copy text',
+                                          iconSize: 20,
+                                          padding: const EdgeInsets.all(8),
+                                          constraints: const BoxConstraints(),
+                                          onPressed: _copyTextSelection,
+                                          icon: const Icon(Icons.copy_outlined),
+                                        ),
+                                        Container(
+                                          height: 24,
+                                          width: 1,
+                                          margin: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .outlineVariant,
+                                        ),
+                                        // Close / Clear selection button
+                                        IconButton(
+                                          tooltip: 'Clear selection',
+                                          iconSize: 20,
+                                          padding: const EdgeInsets.all(8),
+                                          constraints: const BoxConstraints(),
+                                          onPressed: () => setState(() {
+                                            _textSelectionAnchor = null;
+                                            _textSelectionExtent = null;
+                                          }),
+                                          icon: const Icon(Icons.close),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),

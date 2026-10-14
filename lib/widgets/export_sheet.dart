@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
@@ -20,6 +21,7 @@ class ExportSheet extends StatefulWidget {
     required this.page,
     required this.pageCount,
     required this.onStatusChanged,
+    this.initialAction,
   });
 
   final PdfEngineApi engine;
@@ -27,6 +29,7 @@ class ExportSheet extends StatefulWidget {
   final int page;
   final int pageCount;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
+  final String? initialAction;
 
   @override
   State<ExportSheet> createState() => _ExportSheetState();
@@ -35,6 +38,16 @@ class ExportSheet extends StatefulWidget {
 class _ExportSheetState extends State<ExportSheet> {
   bool _busy = false;
   String? _progress;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialAction == 'compress') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _compressToTarget();
+      });
+    }
+  }
 
   Future<bridge.OperationResponse?> _run(
     String tool,
@@ -482,64 +495,10 @@ class _ExportSheetState extends State<ExportSheet> {
   }
 
   Future<void> _compressToTarget() async {
-    final controller = TextEditingController(text: '2');
     try {
-      final targetText = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Choose a target size'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(
-                  labelText: 'Maximum size (MB)',
-                  suffixText: 'MB',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'PdfCraft will try progressively smaller image settings and measure each result. Your open PDF is never changed.',
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Start'),
-            ),
-          ],
-        ),
-      );
-      final targetMb = double.tryParse(targetText?.trim() ?? '');
-      if (targetMb == null ||
-          !targetMb.isFinite ||
-          targetMb <= 0 ||
-          targetMb > 10240) {
-        if (targetText != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Enter a target size between 0 and 10,240 MB.'),
-            ),
-          );
-        }
-        return;
-      }
-      if (!mounted) return;
       setState(() {
         _busy = true;
-        _progress = 'Reading the current PDF…';
+        _progress = 'Reading current document…';
       });
       bridge.SaveSnapshot? snapshot;
       Uint8List original;
@@ -554,17 +513,214 @@ class _ExportSheetState extends State<ExportSheet> {
           );
         }
       }
-      final targetBytes = (targetMb * 1024 * 1024).floor();
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _progress = null;
+      });
+
+      var selectedUnit = 'KB';
+      final controller = TextEditingController(text: '200');
+      final selection = await showDialog<({double value, String unit})>(
+        context: context,
+        builder: (dialogCtx) => StatefulBuilder(
+          builder: (dialogCtx, setModalState) {
+            final presets = [
+              (label: '< 100 KB', value: 100.0, unit: 'KB', tip: 'Strict portal limit'),
+              (label: '< 200 KB', value: 200.0, unit: 'KB', tip: 'Gov / Visa portal standard'),
+              (label: '< 500 KB', value: 500.0, unit: 'KB', tip: 'Job application & resume'),
+              (label: '< 1 MB', value: 1.0, unit: 'MB', tip: 'Web portal ceiling'),
+              (label: '< 2 MB', value: 2.0, unit: 'MB', tip: 'Email attachment ceiling'),
+            ];
+            final currentVal = double.tryParse(controller.text.trim());
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(
+                    Icons.compress_outlined,
+                    color: Theme.of(dialogCtx).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Target file size'),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(dialogCtx).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.description_outlined,
+                            size: 18,
+                            color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Current size: ${_formatFileSize(original.length)}',
+                              style: Theme.of(dialogCtx).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Common portal limits',
+                      style: Theme.of(dialogCtx).textTheme.labelMedium?.copyWith(
+                        color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final preset in presets)
+                          ChoiceChip(
+                            label: Text(preset.label),
+                            selected: selectedUnit == preset.unit &&
+                                currentVal != null &&
+                                (currentVal - preset.value).abs() < 0.001,
+                            onSelected: (selected) {
+                              if (selected) {
+                                setModalState(() {
+                                  selectedUnit = preset.unit;
+                                  controller.text = preset.value.truncateToDouble() == preset.value
+                                      ? preset.value.toInt().toString()
+                                      : preset.value.toString();
+                                });
+                              }
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Custom target ceiling',
+                      style: Theme.of(dialogCtx).textTheme.labelMedium?.copyWith(
+                        color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: InputDecoration(
+                              labelText: 'Max size',
+                              hintText: selectedUnit == 'KB' ? 'e.g. 200' : 'e.g. 2',
+                              border: const OutlineInputBorder(),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            ),
+                            onChanged: (_) => setModalState(() {}),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(value: 'KB', label: Text('KB')),
+                            ButtonSegment(value: 'MB', label: Text('MB')),
+                          ],
+                          selected: {selectedUnit},
+                          onSelectionChanged: (values) {
+                            setModalState(() {
+                              final oldUnit = selectedUnit;
+                              selectedUnit = values.first;
+                              final parsed = double.tryParse(controller.text.trim());
+                              if (parsed != null && parsed > 0) {
+                                if (oldUnit == 'MB' && selectedUnit == 'KB') {
+                                  controller.text = (parsed * 1024).round().toString();
+                                } else if (oldUnit == 'KB' && selectedUnit == 'MB') {
+                                  controller.text = (parsed / 1024).toStringAsFixed(2);
+                                }
+                              }
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'PdfCraft tests multiple downsampling and compression profiles to fit under this limit without unnecessary blur.',
+                      style: Theme.of(dialogCtx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(dialogCtx).colorScheme.outline,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  icon: const Icon(Icons.bolt, size: 18),
+                  label: const Text('Shrink to limit'),
+                  onPressed: () {
+                    final val = double.tryParse(controller.text.trim());
+                    if (val != null && val > 0) {
+                      Navigator.pop(dialogCtx, (value: val, unit: selectedUnit));
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      if (selection == null || !mounted) return;
+
+      final targetValue = selection.value;
+      final targetUnit = selection.unit;
+      final targetLabel =
+          '${targetValue.toStringAsFixed(targetValue.truncateToDouble() == targetValue ? 0 : 1)} $targetUnit';
+      final targetBytes = targetUnit == 'KB'
+          ? (targetValue * 1024).floor()
+          : (targetValue * 1024 * 1024).floor();
+
+      if (targetBytes <= 0 || (targetUnit == 'MB' && targetValue > 10240)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a valid target size.')),
+        );
+        return;
+      }
+
       if (original.length <= targetBytes) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('This PDF is already below that size.'),
+            SnackBar(
+              content: Text(
+                'This PDF is already ${_formatFileSize(original.length)}, which is below your target ($targetLabel).',
+              ),
             ),
           );
         }
         return;
       }
+
+      setState(() {
+        _busy = true;
+        _progress = 'Starting optimization for $targetLabel…';
+      });
+
       Uint8List best = original;
       const profiles = [
         (quality: 72, ppi: 180),
@@ -624,29 +780,45 @@ class _ExportSheetState extends State<ExportSheet> {
         );
         return;
       }
-      final save = await _reviewCompression(
+      final outcome = await _reviewCompression(
         original: original,
         compressed: best,
-        targetMb: targetMb,
+        targetLabel: targetLabel,
         targetReached: reached,
       );
-      if (save != true || !mounted) return;
-      final uri = await FilePickerPlatform.instance.saveFile(
-        fileName: 'compressed.pdf',
-        bytes: best,
-        mimeType: 'application/pdf',
-        dialogTitle: 'Save compressed PDF',
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            uri == null
-                ? 'Save cancelled'
-                : 'Compressed copy saved through Files',
+      if (outcome == null || !mounted) return;
+
+      if (outcome == 'share') {
+        try {
+          await Share.shareXFiles(
+            [XFile.fromData(best, mimeType: 'application/pdf', name: 'compressed.pdf')],
+            subject: 'Compressed PDF ($targetLabel)',
+          );
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Sharing failed: $e')),
+            );
+          }
+        }
+      } else if (outcome == 'save') {
+        final uri = await FilePickerPlatform.instance.saveFile(
+          fileName: 'compressed.pdf',
+          bytes: best,
+          mimeType: 'application/pdf',
+          dialogTitle: 'Save compressed PDF',
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              uri == null
+                  ? 'Save cancelled'
+                  : 'Compressed copy saved through Files',
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -663,10 +835,10 @@ class _ExportSheetState extends State<ExportSheet> {
     }
   }
 
-  Future<bool?> _reviewCompression({
+  Future<String?> _reviewCompression({
     required Uint8List original,
     required Uint8List compressed,
-    required double targetMb,
+    required String targetLabel,
     required bool targetReached,
   }) async {
     final previewHandle = await widget.engine.open(
@@ -696,8 +868,8 @@ class _ExportSheetState extends State<ExportSheet> {
         page1Based: page,
         dpi: 96,
       );
-      if (!mounted) return false;
-      return await showDialog<bool>(
+      if (!mounted) return null;
+      return await showDialog<String>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
           builder: (dialogContext, setDialogState) {
@@ -750,8 +922,8 @@ class _ExportSheetState extends State<ExportSheet> {
                   children: [
                     Text(
                       targetReached
-                          ? '${_formatFileSize(compressed.length)} — within ${targetMb.toStringAsFixed(2)} MB.'
-                          : '${_formatFileSize(compressed.length)} — still above ${targetMb.toStringAsFixed(2)} MB.',
+                          ? '${_formatFileSize(compressed.length)} — within $targetLabel.'
+                          : '${_formatFileSize(compressed.length)} — still above $targetLabel.',
                     ),
                     Text(
                       'Original ${_formatFileSize(original.length)} · $percentSmaller% smaller',
@@ -989,12 +1161,18 @@ class _ExportSheetState extends State<ExportSheet> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
+                  onPressed: () => Navigator.pop(dialogContext, null),
                   child: const Text('Keep original'),
                 ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('Save compressed copy'),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(dialogContext, 'share'),
+                  icon: const Icon(Icons.share_outlined, size: 16),
+                  label: const Text('Share'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => Navigator.pop(dialogContext, 'save'),
+                  icon: const Icon(Icons.download_outlined, size: 16),
+                  label: const Text('Save copy'),
                 ),
               ],
             );

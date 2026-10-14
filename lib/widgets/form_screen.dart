@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
@@ -77,10 +78,29 @@ class _FormScreenState extends State<FormScreen> {
   String? _error;
   int _prefillRefresh = 0;
 
+  bool _visualMode = true;
+  int _activePageIndex = 1;
+  int _totalPages = 1;
+  int _focusedFieldIndex = 0;
+  final Map<int, Uint8List> _pagePngCache = {};
+  final Map<int, Size> _pageSizeCache = {};
+  bool _renderingPage = false;
+  late final TextEditingController _inlineTextController;
+  late final FocusNode _inlineFocusNode;
+
   @override
   void initState() {
     super.initState();
+    _inlineTextController = TextEditingController();
+    _inlineFocusNode = FocusNode();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _inlineTextController.dispose();
+    _inlineFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -108,20 +128,88 @@ class _FormScreenState extends State<FormScreen> {
           }
         }
       }
+      final status = await widget.engine.status(handle: widget.handle);
+      final totalPages = math.max(1, status.pageCount);
       if (!mounted) return;
+      final hasVisualRects = fields.any((f) => f.rect != null);
       setState(() {
         _fields = fields;
         for (final field in fields) {
           _values[field.name] = field.value;
         }
+        _totalPages = totalPages;
+        _visualMode = hasVisualRects;
+        _pagePngCache.clear();
+        _pageSizeCache.clear();
+        if (fields.isNotEmpty) {
+          _focusedFieldIndex = 0;
+          _activePageIndex = fields[0].page;
+          _inlineTextController.text =
+              _values[fields[0].name]?.toString() ?? '';
+        }
         _loading = false;
       });
+      if (hasVisualRects && fields.isNotEmpty) {
+        _loadActivePage(_activePageIndex);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = '$e';
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _loadActivePage(int page) async {
+    if (_pagePngCache.containsKey(page) && _pageSizeCache.containsKey(page)) {
+      return;
+    }
+    setState(() => _renderingPage = true);
+    try {
+      final png = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: page,
+        dpi: 96,
+      );
+      final size = await widget.engine.pageSize(
+        handle: widget.handle,
+        page1Based: page,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pagePngCache[page] = png;
+        _pageSizeCache[page] = Size(size.width, size.height);
+        _renderingPage = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _renderingPage = false);
+    }
+  }
+
+  void _focusField(int index) {
+    if (index < 0 || index >= _fields.length) return;
+    final field = _fields[index];
+    setState(() {
+      _focusedFieldIndex = index;
+      _inlineTextController.text = _values[field.name]?.toString() ?? '';
+      if (_activePageIndex != field.page) {
+        _activePageIndex = field.page;
+        _loadActivePage(field.page);
+      }
+    });
+  }
+
+  void _nextField() {
+    if (_focusedFieldIndex + 1 < _fields.length) {
+      _focusField(_focusedFieldIndex + 1);
+    }
+  }
+
+  void _prevField() {
+    if (_focusedFieldIndex > 0) {
+      _focusField(_focusedFieldIndex - 1);
     }
   }
 
@@ -281,6 +369,18 @@ class _FormScreenState extends State<FormScreen> {
   }
 
   Future<void> _save() async {
+    // Sync current focused inline text if user was typing
+    if (_fields.isNotEmpty &&
+        _focusedFieldIndex >= 0 &&
+        _focusedFieldIndex < _fields.length) {
+      final cur = _fields[_focusedFieldIndex];
+      if (!cur.readOnly &&
+          cur.type != 'checkbox' &&
+          cur.type != 'signature' &&
+          cur.type != 'button') {
+        _values[cur.name] = _inlineTextController.text;
+      }
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -315,6 +415,7 @@ class _FormScreenState extends State<FormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Fill form'),
@@ -363,37 +464,519 @@ class _FormScreenState extends State<FormScreen> {
                 _error ?? 'This document has no fillable form fields.',
               ),
             )
-          : ListView(
-              padding: const EdgeInsets.all(16),
+          : Column(
               children: [
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                // Mode Switcher & Page Selector Strip
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    border: Border(
+                      bottom: BorderSide(
+                        color: theme.colorScheme.outlineVariant,
+                        width: 0.5,
                       ),
                     ),
                   ),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.auto_awesome_outlined),
-                    title: const Text('Use details to fill fields'),
-                    subtitle: const Text(
-                      'Paste labelled details, review matches, then edit before saving',
-                    ),
-                    onTap: _saving ? null : _prefillFromDetails,
+                  child: Row(
+                    children: [
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: true,
+                            label: Text('Page View'),
+                            icon: Icon(Icons.picture_as_pdf_outlined, size: 16),
+                          ),
+                          ButtonSegment<bool>(
+                            value: false,
+                            label: Text('Field List'),
+                            icon: Icon(Icons.format_list_bulleted_outlined, size: 16),
+                          ),
+                        ],
+                        selected: {_visualMode},
+                        onSelectionChanged: (selection) {
+                          setState(() {
+                            _visualMode = selection.first;
+                            if (_visualMode && _fields.isNotEmpty) {
+                              _loadActivePage(_activePageIndex);
+                            }
+                          });
+                        },
+                      ),
+                      const Spacer(),
+                      if (_visualMode && _totalPages > 1) ...[
+                        IconButton(
+                          tooltip: 'Previous page',
+                          icon: const Icon(Icons.chevron_left),
+                          onPressed: _activePageIndex > 1
+                              ? () {
+                                  setState(() => _activePageIndex--);
+                                  _loadActivePage(_activePageIndex);
+                                }
+                              : null,
+                        ),
+                        Text(
+                          '$_activePageIndex / $_totalPages',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Next page',
+                          icon: const Icon(Icons.chevron_right),
+                          onPressed: _activePageIndex < _totalPages
+                              ? () {
+                                  setState(() => _activePageIndex++);
+                                  _loadActivePage(_activePageIndex);
+                                }
+                              : null,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                for (final field in _fields) _fieldInput(field),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                  ),
+                Expanded(
+                  child: _visualMode
+                      ? _buildVisualCanvas(context)
+                      : _buildFieldListView(context),
+                ),
+                if (_visualMode && _fields.isNotEmpty)
+                  _buildBottomAccessoryStrip(theme),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _loading || _saving ? null : _addField,
-        icon: const Icon(Icons.add),
-        label: const Text('Add field'),
+      floatingActionButton: !_visualMode && !_loading && !_saving
+          ? FloatingActionButton.extended(
+              onPressed: _addField,
+              icon: const Icon(Icons.add),
+              label: const Text('Add field'),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildFieldListView(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.auto_awesome_outlined),
+            title: const Text('Use details to fill fields'),
+            subtitle: const Text(
+              'Paste labelled details, review matches, then edit before saving',
+            ),
+            onTap: _saving ? null : _prefillFromDetails,
+          ),
+        ),
+        for (final field in _fields) _fieldInput(field),
+      ],
+    );
+  }
+
+  Widget _buildVisualCanvas(BuildContext context) {
+    final png = _pagePngCache[_activePageIndex];
+    final pageSize = _pageSizeCache[_activePageIndex];
+
+    if (_renderingPage || png == null || pageSize == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('Rendering page...'),
+          ],
+        ),
+      );
+    }
+
+    final theme = Theme.of(context);
+    final pageFields = _fields
+        .where((f) => f.page == _activePageIndex && f.rect != null)
+        .toList();
+
+    return InteractiveViewer(
+      minScale: 0.8,
+      maxScale: 5.0,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final scale = math.min(
+                constraints.maxWidth / pageSize.width,
+                constraints.maxHeight / pageSize.height,
+              );
+              final renderWidth = pageSize.width * scale;
+              final renderHeight = pageSize.height * scale;
+
+              return SizedBox(
+                width: renderWidth,
+                height: renderHeight,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Base Page Rendering
+                    Positioned.fill(
+                      child: Image.memory(png, fit: BoxFit.fill),
+                    ),
+                    if (pageFields.isEmpty)
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        right: 12,
+                        child: Material(
+                          color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(8),
+                          elevation: 2,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  size: 16,
+                                  color: theme.colorScheme.primary,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'No form fields on page $_activePageIndex. Switch page to interact with fields.',
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    for (final f in pageFields)
+                      Builder(
+                        builder: (context) {
+                          final r = f.rect!;
+                          final x1 = math.min(r[0], r[2]);
+                          final x2 = math.max(r[0], r[2]);
+                          final y1 = math.min(r[1], r[3]);
+                          final y2 = math.max(r[1], r[3]);
+                          final left = x1 * scale;
+                          final top = y1 * scale;
+                          final width = math.max(28.0, (x2 - x1) * scale);
+                          final height = math.max(24.0, (y2 - y1) * scale);
+                          final fieldIndex = _fields.indexOf(f);
+                          final isFocused = fieldIndex == _focusedFieldIndex;
+                          final valStr = _values[f.name]?.toString().trim() ?? '';
+                          final hasValue = valStr.isNotEmpty && valStr != 'false';
+
+                          return Positioned(
+                            left: left,
+                            top: top,
+                            width: width,
+                            height: height,
+                            child: Semantics(
+                              label:
+                                  'Form field ${f.name}, type ${f.type}, value ${_values[f.name] ?? "empty"}',
+                              button: true,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _focusField(fieldIndex),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  decoration: BoxDecoration(
+                                    color: isFocused
+                                        ? theme.colorScheme.primary.withValues(alpha: 0.28)
+                                        : hasValue
+                                            ? Colors.green.withValues(alpha: 0.12)
+                                            : theme.colorScheme.primary.withValues(alpha: 0.08),
+                                    border: Border.all(
+                                      color: isFocused
+                                          ? theme.colorScheme.primary
+                                          : hasValue
+                                              ? Colors.green.shade600
+                                              : theme.colorScheme.primary.withValues(alpha: 0.6),
+                                      width: isFocused ? 2.5 : 1.5,
+                                    ),
+                                    borderRadius: BorderRadius.circular(3),
+                                    boxShadow: isFocused
+                                        ? [
+                                            BoxShadow(
+                                              color: theme.colorScheme.primary
+                                                  .withValues(alpha: 0.35),
+                                              blurRadius: 6,
+                                              spreadRadius: 1,
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      if (hasValue && !isFocused)
+                                        Positioned(
+                                          top: 1,
+                                          right: 1,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(1),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.shade600,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(
+                                              Icons.check,
+                                              size: 10,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                      if (isFocused)
+                                        Positioned(
+                                          top: -20,
+                                          left: 0,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: theme.colorScheme.primary,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              f.name,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
       ),
+    );
+  }
+
+  Widget _buildBottomAccessoryStrip(ThemeData theme) {
+    if (_fields.isEmpty || _focusedFieldIndex < 0 || _focusedFieldIndex >= _fields.length) {
+      return const SizedBox.shrink();
+    }
+    final activeField = _fields[_focusedFieldIndex];
+    final hasPrev = _focusedFieldIndex > 0;
+    final hasNext = _focusedFieldIndex + 1 < _fields.length;
+
+    return Material(
+      elevation: 8,
+      color: theme.colorScheme.surfaceContainerHighest,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Previous field',
+                    icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+                    onPressed: hasPrev ? _prevField : null,
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          'Field ${_focusedFieldIndex + 1} of ${_fields.length} (Page ${activeField.page})',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          activeField.name,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next field',
+                    icon: const Icon(Icons.arrow_forward_ios, size: 18),
+                    onPressed: hasNext ? _nextField : null,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _buildFocusedFieldInput(activeField, theme, hasNext),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFocusedFieldInput(FormField field, ThemeData theme, bool hasNext) {
+    if (field.readOnly) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Text(
+            '${_values[field.name] ?? "(empty)"} (Read-only field)',
+            style: TextStyle(color: theme.colorScheme.outline),
+          ),
+        ),
+      );
+    }
+
+    if (field.type == 'checkbox') {
+      final checked = _values[field.name] == true;
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(checked ? 'Checked' : 'Unchecked', style: theme.textTheme.bodyMedium),
+          const SizedBox(width: 8),
+          Switch(
+            value: checked,
+            onChanged: (v) {
+              setState(() => _values[field.name] = v);
+            },
+          ),
+          const SizedBox(width: 12),
+          if (hasNext)
+            FilledButton.tonalIcon(
+              icon: const Icon(Icons.arrow_forward, size: 16),
+              label: const Text('Next'),
+              onPressed: _nextField,
+            ),
+        ],
+      );
+    }
+
+    if (['radio', 'combo', 'list'].contains(field.type)) {
+      final current = _values[field.name]?.toString();
+      final items = field.options.isEmpty && current != null
+          ? [current]
+          : field.options;
+
+      if (items.length <= 4 && items.isNotEmpty) {
+        return Wrap(
+          spacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            for (final opt in items)
+              ChoiceChip(
+                label: Text(opt),
+                selected: current == opt,
+                onSelected: (selected) {
+                  setState(() => _values[field.name] = selected ? opt : null);
+                },
+              ),
+          ],
+        );
+      } else {
+        return DropdownButtonFormField<String>(
+          value: items.contains(current) ? current : null,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            hintText: 'Select option',
+          ),
+          items: [
+            for (final opt in items)
+              DropdownMenuItem(value: opt, child: Text(opt)),
+          ],
+          onChanged: (v) {
+            setState(() => _values[field.name] = v);
+          },
+        );
+      }
+    }
+
+    if (field.type == 'signature' || field.type == 'button') {
+      return Center(
+        child: Text(
+          '${field.type} field · use Sign in Edit to sign',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _inlineTextController,
+            focusNode: _inlineFocusNode,
+            textInputAction: hasNext ? TextInputAction.next : TextInputAction.done,
+            onChanged: (val) {
+              _values[field.name] = val;
+            },
+            onSubmitted: (_) {
+              if (hasNext) {
+                _nextField();
+              }
+            },
+            decoration: InputDecoration(
+              hintText: 'Enter ${field.name}',
+              border: const OutlineInputBorder(),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              suffixIcon: _inlineTextController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _inlineTextController.clear();
+                        setState(() => _values[field.name] = '');
+                      },
+                    )
+                  : null,
+            ),
+          ),
+        ),
+        if (hasNext) ...[
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: 'Next field',
+            icon: const Icon(Icons.arrow_forward),
+            onPressed: _nextField,
+          ),
+        ],
+      ],
     );
   }
 
@@ -791,15 +1374,26 @@ class _FormScreenState extends State<FormScreen> {
     }
   }
 
+  void _onFieldLocationTap(FormField field) {
+    if (field.rect != null) {
+      _focusField(_fields.indexOf(field));
+      setState(() => _visualMode = true);
+    } else {
+      _previewFieldOnPage(field);
+    }
+  }
+
   Widget _fieldInput(FormField field) {
     if (field.readOnly) {
       return ListTile(
         title: Text(field.name),
         subtitle: Text('${field.value ?? ''} (read-only)'),
         trailing: IconButton(
-          tooltip: 'Preview on page ${field.page}',
+          tooltip: field.rect != null
+              ? 'Focus on page ${field.page}'
+              : 'Preview on page ${field.page}',
           icon: const Icon(Icons.location_searching, size: 20),
-          onPressed: () => _previewFieldOnPage(field),
+          onPressed: () => _onFieldLocationTap(field),
         ),
       );
     }
@@ -810,9 +1404,11 @@ class _FormScreenState extends State<FormScreen> {
           title: Text(field.name),
           value: checked,
           secondary: IconButton(
-            tooltip: 'Preview on page ${field.page}',
+            tooltip: field.rect != null
+                ? 'Focus on page ${field.page}'
+                : 'Preview on page ${field.page}',
             icon: const Icon(Icons.location_searching, size: 20),
-            onPressed: () => _previewFieldOnPage(field),
+            onPressed: () => _onFieldLocationTap(field),
           ),
           onChanged: (v) => setState(() => _values[field.name] = v ?? false),
         );
@@ -844,9 +1440,11 @@ class _FormScreenState extends State<FormScreen> {
               ),
               const SizedBox(width: 4),
               IconButton(
-                tooltip: 'Preview on page ${field.page}',
+                tooltip: field.rect != null
+                    ? 'Focus on page ${field.page}'
+                    : 'Preview on page ${field.page}',
                 icon: const Icon(Icons.location_searching, size: 20),
-                onPressed: () => _previewFieldOnPage(field),
+                onPressed: () => _onFieldLocationTap(field),
               ),
             ],
           ),
@@ -857,9 +1455,11 @@ class _FormScreenState extends State<FormScreen> {
           title: Text(field.name),
           subtitle: Text('${field.type} field — use editing tools'),
           trailing: IconButton(
-            tooltip: 'Preview on page ${field.page}',
+            tooltip: field.rect != null
+                ? 'Focus on page ${field.page}'
+                : 'Preview on page ${field.page}',
             icon: const Icon(Icons.location_searching, size: 20),
-            onPressed: () => _previewFieldOnPage(field),
+            onPressed: () => _onFieldLocationTap(field),
           ),
         );
       default:
@@ -880,9 +1480,11 @@ class _FormScreenState extends State<FormScreen> {
               ),
               const SizedBox(width: 4),
               IconButton(
-                tooltip: 'Preview on page ${field.page}',
+                tooltip: field.rect != null
+                    ? 'Focus on page ${field.page}'
+                    : 'Preview on page ${field.page}',
                 icon: const Icon(Icons.location_searching, size: 20),
-                onPressed: () => _previewFieldOnPage(field),
+                onPressed: () => _onFieldLocationTap(field),
               ),
             ],
           ),

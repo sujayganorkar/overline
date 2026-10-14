@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
 
 import '../services/pdf_engine.dart';
+import 'delivery_hub_sheet.dart';
 
 /// A result path worth offering through Save As: workspace-relative output
 /// files only. Staged inputs (`imports/…`), absolute paths, and the open
@@ -85,8 +87,10 @@ String mimeTypeFor(String path) {
 Future<void> saveToolOutputs(
   BuildContext context,
   PdfEngineApi engine,
-  List<String> jsonSources,
-) async {
+  List<String> jsonSources, {
+  VoidCallback? onOpenInReader,
+  void Function(Uint8List bytes, String name)? onOpenDocument,
+}) async {
   final paths = <String>[];
   for (final source in jsonSources) {
     for (final path in outputPathsIn(source)) {
@@ -94,41 +98,43 @@ Future<void> saveToolOutputs(
     }
   }
   if (paths.isEmpty) return;
-  await saveOutputPaths(context, engine, paths);
+  await saveOutputPaths(
+    context,
+    engine,
+    paths,
+    onOpenInReader: onOpenInReader,
+    onOpenDocument: onOpenDocument,
+  );
 }
 
-/// Offer the system Save As sheet for explicit engine workspace output paths.
+/// Offer the delivery hub sheet for explicit engine workspace output paths.
 Future<void> saveOutputPaths(
   BuildContext context,
   PdfEngineApi engine,
-  List<String> paths,
-) async {
+  List<String> paths, {
+  VoidCallback? onOpenInReader,
+  void Function(Uint8List bytes, String name)? onOpenDocument,
+}) async {
   for (final path in paths) {
     if (!context.mounted) return;
     try {
       final bytes = await engine.readOutput(path: path);
       final name = path.split('/').last;
-      final uri = await FilePickerPlatform.instance.saveFile(
-        fileName: name.isEmpty ? 'output' : name,
-        bytes: bytes,
-        mimeType: mimeTypeFor(path),
-        dialogTitle: 'Save $name',
-      );
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            uri == null
-                ? 'Save cancelled for $name'
-                : 'Saved $name through Files',
-          ),
-        ),
+      await DeliveryHubSheet.show(
+        context,
+        title: 'Document Ready',
+        subtitle: name,
+        bytes: bytes,
+        suggestedFileName: name.isEmpty ? 'output.pdf' : name,
+        badgeText: 'EXPORTED',
+        onOpenInReader: onOpenInReader,
+        onOpenDocument: onOpenDocument,
       );
-      if (uri == null) return;
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save ${path.split('/').last}: $e')),
+        SnackBar(content: Text('Could not open ${path.split('/').last}: $e')),
       );
       return;
     }
