@@ -36,10 +36,9 @@ android {
 
     packaging {
         jniLibs {
-            // path_provider_android's JNI helper builds this for all ABIs,
-            // independent of the app ABI filters. Shipping only that library
-            // would make Android advertise an unsupported ARMv7 APK variant.
-            excludes += "**/armeabi-v7a/libdartjni.so"
+            // Some dependencies package 32-bit helpers independent of app ABI filters.
+            // Exclude all ARMv7 libraries so Android only advertises 64-bit support.
+            excludes += "**/armeabi-v7a/**"
         }
     }
 
