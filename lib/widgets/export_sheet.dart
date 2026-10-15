@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../services/pdf_engine.dart';
+import '../services/target_compression.dart';
 import 'output_saver.dart';
 import 'result_summary.dart';
 
@@ -797,14 +798,16 @@ class _ExportSheetState extends State<ExportSheet> {
                               final parsed = double.tryParse(
                                 controller.text.trim(),
                               );
-                              if (parsed != null && parsed > 0) {
+                              if (parsed != null &&
+                                  parsed.isFinite &&
+                                  parsed > 0) {
                                 if (oldUnit == 'MB' && selectedUnit == 'KB') {
-                                  controller.text = (parsed * 1024)
+                                  controller.text = (parsed * 1000)
                                       .round()
                                       .toString();
                                 } else if (oldUnit == 'KB' &&
                                     selectedUnit == 'MB') {
-                                  controller.text = (parsed / 1024)
+                                  controller.text = (parsed / 1000)
                                       .toStringAsFixed(2);
                                 }
                               }
@@ -815,7 +818,7 @@ class _ExportSheetState extends State<ExportSheet> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'PdfCraft tests multiple downsampling and compression profiles to fit under this limit without unnecessary blur.',
+                      'Only copies within your limit can be exported. KB = 1,000 bytes; MB = 1,000,000 bytes. Smaller targets may need an image-only copy.',
                       style: Theme.of(dialogCtx).textTheme.bodySmall?.copyWith(
                         color: Theme.of(dialogCtx).colorScheme.outline,
                         fontSize: 11,
@@ -832,15 +835,25 @@ class _ExportSheetState extends State<ExportSheet> {
                 FilledButton.icon(
                   icon: const Icon(Icons.bolt, size: 18),
                   label: const Text('Shrink to limit'),
-                  onPressed: () {
-                    final val = double.tryParse(controller.text.trim());
-                    if (val != null && val > 0) {
-                      Navigator.pop(dialogCtx, (
-                        value: val,
-                        unit: selectedUnit,
-                      ));
-                    }
-                  },
+                  onPressed:
+                      currentVal == null ||
+                          !currentVal.isFinite ||
+                          currentVal <= 0 ||
+                          currentVal > (selectedUnit == 'KB' ? 10000000 : 10000)
+                      ? null
+                      : () {
+                          final val = double.tryParse(controller.text.trim());
+                          if (val != null &&
+                              val.isFinite &&
+                              val > 0 &&
+                              val <=
+                                  (selectedUnit == 'KB' ? 10000000 : 10000)) {
+                            Navigator.pop(dialogCtx, (
+                              value: val,
+                              unit: selectedUnit,
+                            ));
+                          }
+                        },
                 ),
               ],
             );
@@ -852,10 +865,10 @@ class _ExportSheetState extends State<ExportSheet> {
       final targetValue = selection.value;
       final targetUnit = selection.unit;
       final targetLabel =
-          '${targetValue.toStringAsFixed(targetValue.truncateToDouble() == targetValue ? 0 : 1)} $targetUnit';
+          '${targetValue.truncateToDouble() == targetValue ? targetValue.toInt() : targetValue} $targetUnit';
       final targetBytes = targetUnit == 'KB'
-          ? (targetValue * 1024).floor()
-          : (targetValue * 1024 * 1024).floor();
+          ? (targetValue * 1000).floor()
+          : (targetValue * 1000 * 1000).floor();
 
       if (targetBytes <= 0 || (targetUnit == 'MB' && targetValue > 10240)) {
         AppNotice.show(
@@ -887,70 +900,59 @@ class _ExportSheetState extends State<ExportSheet> {
         _progress = 'Starting optimization for $targetLabel…';
       });
 
-      Uint8List best = original;
-      const profiles = [
-        (quality: 72, ppi: 180),
-        (quality: 58, ppi: 150),
-        (quality: 46, ppi: 120),
-        (quality: 36, ppi: 96),
-        (quality: 26, ppi: 72),
-        (quality: 18, ppi: 50),
-      ];
-      const candidatePath = 'outputs/compressed.pdf';
-      for (var index = 0; index < profiles.length; index++) {
-        final profile = profiles[index];
-        if (!mounted) return;
-        setState(() {
-          _progress =
-              'Trying quality ${profile.quality}, ${profile.ppi} ppi (${index + 1}/${profiles.length})…';
-        });
-        final response = await _run('doc_optimize', {
-          'path': candidatePath,
-          'color': {
-            'downsample': true,
-            'ppi': profile.ppi,
-            'above_ppi': profile.ppi,
-            'compression': 'jpeg',
-            'quality': profile.quality,
-          },
-          'gray': {
-            'downsample': true,
-            'ppi': profile.ppi,
-            'above_ppi': profile.ppi,
-            'compression': 'jpeg',
-            'quality': profile.quality,
-          },
-          'discard_thumbnails': true,
-          'discard_alternate_images': true,
-          'flate_unencoded': true,
-        }, refreshStatus: false);
-        if (response == null) return;
-        final paths = <String>[
-          for (final content in response.contents)
-            ...outputPathsIn(content.json),
-        ];
-        final outputPath = paths.isNotEmpty ? paths.first : candidatePath;
-        final candidate = await widget.engine.readOutput(path: outputPath);
-        if (candidate.length < best.length) best = candidate;
-        if (candidate.length <= targetBytes) {
-          best = candidate;
-          break;
-        }
+      final compressor = TargetCompression(
+        engine: widget.engine,
+        handle: widget.handle,
+        pageCount: widget.pageCount,
+        isActive: () => mounted,
+        progress: (message) {
+          if (mounted) setState(() => _progress = message);
+        },
+      );
+      var result = await compressor.optimize(original, targetBytes);
+      if (!mounted) return;
+      if (!result.reached) {
+        final flatten = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Try a smaller image-only copy?'),
+            content: Text(
+              'Image optimization reached ${_formatFileSize(result.bytes.length)}, above $targetLabel. '
+              'An image-only copy keeps every page visually, but text will no longer be searchable or selectable, '
+              'and forms, links and comments will no longer be interactive. Small targets can make text blurry. '
+              'You can inspect every page before saving. Your original stays unchanged.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep original'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Try image copy'),
+              ),
+            ],
+          ),
+        );
+        if (flatten != true || !mounted) return;
+        result = await compressor.imageCopy(result.bytes, targetBytes);
       }
       if (!mounted) return;
-      final reached = best.length <= targetBytes;
-      if (best.length >= original.length) {
+      if (!result.reached) {
         await _showReport(
-          'Could not make a smaller copy',
-          'The tried image settings did not reduce this PDF. Your original is unchanged.',
+          'Target could not be reached',
+          'The smallest result was ${_formatFileSize(result.bytes.length)}. Your limit is $targetLabel. '
+              'No oversized copy will be exported. Choose a larger target or split the PDF into fewer pages.',
         );
         return;
       }
+      final best = result.bytes;
       final outcome = await _reviewCompression(
         original: original,
         compressed: best,
         targetLabel: targetLabel,
-        targetReached: reached,
+        targetBytes: targetBytes,
+        imageOnly: result.imageOnly,
       );
       if (outcome == null || !mounted) return;
 
@@ -1028,8 +1030,12 @@ class _ExportSheetState extends State<ExportSheet> {
     required Uint8List original,
     required Uint8List compressed,
     required String targetLabel,
-    required bool targetReached,
+    required int targetBytes,
+    bool imageOnly = false,
   }) async {
+    if (compressed.isEmpty || compressed.length > targetBytes) {
+      throw StateError('The copy exceeds the selected file-size limit.');
+    }
     final previewHandle = await widget.engine.open(
       name: 'compression-preview.pdf',
       bytes: compressed,
@@ -1105,7 +1111,7 @@ class _ExportSheetState extends State<ExportSheet> {
                     .round();
             return AlertDialog(
               title: Text(
-                targetReached ? 'Review compressed copy' : 'Review best result',
+                imageOnly ? 'Review image-only copy' : 'Review compressed copy',
               ),
               content: SizedBox(
                 width: 480,
@@ -1113,14 +1119,16 @@ class _ExportSheetState extends State<ExportSheet> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      targetReached
-                          ? '${_formatFileSize(compressed.length)} — within $targetLabel.'
-                          : '${_formatFileSize(compressed.length)} — still above $targetLabel.',
+                      '${_formatFileSize(compressed.length)} — within $targetLabel.',
                     ),
                     Text(
                       'Original ${_formatFileSize(original.length)} · $percentSmaller% smaller',
                       style: Theme.of(dialogContext).textTheme.bodySmall,
                     ),
+                    if (imageOnly)
+                      const Text(
+                        'Image-only copy: search, selectable text, forms and links are not retained.',
+                      ),
                     const SizedBox(height: 8),
                     SegmentedButton<String>(
                       segments: const [
@@ -1381,9 +1389,9 @@ class _ExportSheetState extends State<ExportSheet> {
   }
 
   String _formatFileSize(int bytes) {
-    final mb = bytes / (1024 * 1024);
+    final mb = bytes / (1000 * 1000);
     if (mb >= 1) return '${mb.toStringAsFixed(2)} MB';
-    return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1000).toStringAsFixed(1)} KB';
   }
 
   Widget _section(String label) => Padding(

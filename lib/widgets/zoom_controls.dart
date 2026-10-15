@@ -10,12 +10,14 @@ class ZoomControlsHud extends StatelessWidget {
     this.minScale = 1.0,
     this.maxScale = 8.0,
     this.viewportSize,
+    this.viewportSizeProvider,
   });
 
   final TransformationController transformController;
   final double minScale;
   final double maxScale;
   final Size? viewportSize;
+  final Size? Function()? viewportSizeProvider;
 
   void _zoomBy(double factor) {
     final current = transformController.value;
@@ -24,10 +26,11 @@ class ZoomControlsHud extends StatelessWidget {
     if ((targetScale - currentScale).abs() < 0.01) return;
     final scaleRatio = targetScale / currentScale;
 
+    final viewportSize = viewportSizeProvider?.call() ?? this.viewportSize;
     if (viewportSize != null &&
-        viewportSize!.width > 0 &&
-        viewportSize!.height > 0) {
-      final center = Offset(viewportSize!.width / 2, viewportSize!.height / 2);
+        viewportSize.width > 0 &&
+        viewportSize.height > 0) {
+      final center = Offset(viewportSize.width / 2, viewportSize.height / 2);
       final sceneCenter = transformController.toScene(center);
       final dx = center.dx - sceneCenter.dx * targetScale;
       final dy = center.dy - sceneCenter.dy * targetScale;
@@ -47,87 +50,51 @@ class ZoomControlsHud extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Material(
-      elevation: 4,
-      shadowColor: Colors.black26,
-      borderRadius: BorderRadius.circular(24),
-      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.92),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+  Widget build(BuildContext context) => ValueListenableBuilder<Matrix4>(
+    valueListenable: transformController,
+    builder: (context, matrix, _) {
+      final scale = matrix.getMaxScaleOnAxis();
+      final zoomed = scale > minScale + .01;
+      return Material(
+        borderRadius: BorderRadius.circular(24),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              tooltip: 'Zoom in',
               style: IconButton.styleFrom(
                 minimumSize: const Size(48, 48),
                 tapTargetSize: MaterialTapTargetSize.padded,
               ),
-              icon: const Icon(Icons.zoom_in, size: 22),
-              onPressed: () => _zoomBy(1.3),
+              tooltip: 'Zoom out',
+              onPressed: scale <= minScale + .01
+                  ? null
+                  : () => _zoomBy(1 / 1.3),
+              icon: const Icon(Icons.zoom_out),
             ),
-            ValueListenableBuilder<Matrix4>(
-              valueListenable: transformController,
-              builder: (context, matrix, _) {
-                final scalePercent = (matrix.getMaxScaleOnAxis() * 100).round();
-                final isZoomed = scalePercent > 102;
-
-                return Semantics(
-                  button: true,
-                  label:
-                      'Zoom level $scalePercent percent.${isZoomed ? ' Double tap to reset to 100% fit scale.' : ''}',
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: isZoomed ? _resetZoom : () => _zoomBy(1.5),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: Text(
-                        '$scalePercent%',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: isZoomed ? colorScheme.primary : null,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
+            Tooltip(
+              message: zoomed ? 'Reset zoom to fit page' : 'Page fits view',
+              child: SizedBox(
+                width: 88,
+                height: 48,
+                child: TextButton(
+                  onPressed: zoomed ? _resetZoom : null,
+                  child: Text('${(scale * 100).round()}%'),
+                ),
+              ),
             ),
             IconButton(
-              tooltip: 'Zoom out',
               style: IconButton.styleFrom(
                 minimumSize: const Size(48, 48),
                 tapTargetSize: MaterialTapTargetSize.padded,
               ),
-              icon: const Icon(Icons.zoom_out, size: 22),
-              onPressed: () => _zoomBy(0.77),
-            ),
-            ValueListenableBuilder<Matrix4>(
-              valueListenable: transformController,
-              builder: (context, matrix, _) {
-                final isZoomed = matrix.getMaxScaleOnAxis() > 1.02;
-                if (!isZoomed) return const SizedBox.shrink();
-                return IconButton(
-                  tooltip: 'Reset zoom to fit page',
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(48, 48),
-                    tapTargetSize: MaterialTapTargetSize.padded,
-                  ),
-                  icon: const Icon(Icons.restart_alt, size: 20),
-                  onPressed: _resetZoom,
-                );
-              },
+              tooltip: 'Zoom in',
+              onPressed: scale >= maxScale - .01 ? null : () => _zoomBy(1.3),
+              icon: const Icon(Icons.zoom_in),
             ),
           ],
         ),
-      ),
-    );
-  }
+      );
+    },
+  );
 }
