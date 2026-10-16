@@ -325,6 +325,25 @@ fn prepare_runtime(workspace: &str) -> Result<(Automation, PathBuf), String> {
     Ok((automation, root))
 }
 
+fn catch_panic<F, T>(f: F, context: &str) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(result) => result,
+        Err(err) => {
+            let msg = if let Some(s) = err.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = err.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown internal panic".to_string()
+            };
+            Err(format!("PdfCraft engine panic in {context}: {msg}"))
+        }
+    }
+}
+
 fn worker_main(automation: Automation, root: PathBuf, mut rx: tokio::sync::mpsc::Receiver<Cmd>) {
     let mut state = Runtime {
         automation,
@@ -341,17 +360,20 @@ fn worker_main(automation: Automation, root: PathBuf, mut rx: tokio::sync::mpsc:
                 if reply.is_closed() {
                     continue;
                 }
-                let result = open_document(&mut state, request);
+                let result = catch_panic(|| open_document(&mut state, request), "open");
                 let _ = reply.send(result);
             }
             Cmd::Status(handle, reply) => {
-                let _ = reply.send(document_status(&state, handle));
+                let result = catch_panic(|| document_status(&state, handle), "document status");
+                let _ = reply.send(result);
             }
             Cmd::PageSize(handle, page, reply) => {
-                let _ = reply.send(page_size(&state, handle, page));
+                let result = catch_panic(|| page_size(&state, handle, page), "page size");
+                let _ = reply.send(result);
             }
             Cmd::Render(handle, page, dpi, reply) => {
-                let _ = reply.send(render_page(&mut state, handle, page, dpi));
+                let result = catch_panic(|| render_page(&mut state, handle, page, dpi), "render");
+                let _ = reply.send(result);
             }
             Cmd::Catalog(reply) => {
                 let _ = reply.send(Ok(tool_catalog()));
@@ -360,25 +382,35 @@ fn worker_main(automation: Automation, root: PathBuf, mut rx: tokio::sync::mpsc:
                 if reply.is_closed() {
                     continue;
                 }
-                let _ = reply.send(execute_tool(&mut state, handle, &tool, &args));
+                let result = catch_panic(
+                    || execute_tool(&mut state, handle, &tool, &args),
+                    "execute tool",
+                );
+                let _ = reply.send(result);
             }
             Cmd::SaveSnapshot(handle, reply) => {
-                let _ = reply.send(save_snapshot(&mut state, handle));
+                let result = catch_panic(|| save_snapshot(&mut state, handle), "save snapshot");
+                let _ = reply.send(result);
             }
             Cmd::CommitSave(handle, token, reply) => {
-                let _ = reply.send(commit_save(&mut state, handle, token));
+                let result = catch_panic(|| commit_save(&mut state, handle, token), "commit save");
+                let _ = reply.send(result);
             }
             Cmd::CancelSave(handle, token, reply) => {
-                let _ = reply.send(cancel_save(&mut state, handle, token));
+                let result = catch_panic(|| cancel_save(&mut state, handle, token), "cancel save");
+                let _ = reply.send(result);
             }
             Cmd::StageFile(name, bytes, reply) => {
-                let _ = reply.send(stage_file(&mut state, &name, &bytes));
+                let result = catch_panic(|| stage_file(&mut state, &name, &bytes), "stage file");
+                let _ = reply.send(result);
             }
             Cmd::ReadOutput(path, reply) => {
-                let _ = reply.send(read_output(&state, &path));
+                let result = catch_panic(|| read_output(&state, &path), "read output");
+                let _ = reply.send(result);
             }
             Cmd::Close(handle, discard, reply) => {
-                let _ = reply.send(close_document(&mut state, handle, discard));
+                let result = catch_panic(|| close_document(&mut state, handle, discard), "close");
+                let _ = reply.send(result);
             }
         }
     }

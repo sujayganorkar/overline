@@ -14,6 +14,9 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Clean up stale incoming intent files older than 24 hours
+        pruneStaleIncomingCache()
+
         // Extract incoming PDF from the launch intent if present
         if (pendingPdfMap == null) {
             pendingPdfMap = extractPdfFromIntent(intent)
@@ -54,6 +57,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun pruneStaleIncomingCache() {
+        try {
+            val maxAgeMs = 24 * 60 * 60 * 1000L // 24 hours
+            val now = System.currentTimeMillis()
+            val files = cacheDir.listFiles { file -> file.name.startsWith("incoming_") } ?: return
+            for (file in files) {
+                if (now - file.lastModified() > maxAgeMs) {
+                    file.delete()
+                }
+            }
+        } catch (_: Exception) {
+            // Best effort cache maintenance
+        }
+    }
+
     private fun extractPdfFromIntent(intent: Intent?): Map<String, String>? {
         if (intent == null) return null
         val uri: Uri? = when (intent.action) {
@@ -67,20 +85,34 @@ class MainActivity : FlutterActivity() {
         if (uri == null) return null
 
         return try {
-            var fileName = "shared_document.pdf"
+            if (uri.scheme == "content") {
+                try {
+                    val flags = intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    if (flags != 0) {
+                        contentResolver.takePersistableUriPermission(uri, flags)
+                    }
+                } catch (_: SecurityException) {
+                    // Non-persistable content provider URI
+                }
+            }
+            var rawFileName = "shared_document.pdf"
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (nameIndex != -1 && cursor.moveToFirst()) {
-                    fileName = cursor.getString(nameIndex) ?: fileName
+                    rawFileName = cursor.getString(nameIndex) ?: rawFileName
                 }
             }
-            val cacheFile = File(cacheDir, "incoming_${System.currentTimeMillis()}_$fileName")
+            // Sanitize file name to prevent path traversal
+            val baseName = File(rawFileName).name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val safeFileName = if (baseName.isNotEmpty()) baseName else "shared_document.pdf"
+
+            val cacheFile = File(cacheDir, "incoming_${System.currentTimeMillis()}_$safeFileName")
             contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(cacheFile).use { output ->
                     input.copyTo(output)
                 }
             }
-            mapOf("name" to fileName, "path" to cacheFile.absolutePath)
+            mapOf("name" to rawFileName, "path" to cacheFile.absolutePath)
         } catch (e: Exception) {
             null
         }

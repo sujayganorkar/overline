@@ -37,12 +37,21 @@ import 'widgets/recipes_sheet.dart';
 import 'widgets/secure_sheet.dart';
 import 'widgets/signature_pad.dart';
 import 'widgets/signature_placement_page.dart';
+import 'services/app_diagnostics.dart';
+import 'services/page_cache.dart';
+import 'services/feature_flags.dart';
+import 'services/telemetry_sink.dart';
+import 'services/review_prompt.dart';
+import 'widgets/diagnostics_sheet.dart';
 import 'widgets/signature_sheet.dart';
 import 'widgets/text_edit_sheet.dart';
 import 'widgets/output_saver.dart';
 import 'widgets/reader_controls.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppDiagnostics.installGlobalErrorHandlers();
+  await FeatureFlagService.instance.initialize();
   runApp(const PdfCraftApp());
 }
 
@@ -223,14 +232,14 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   int _viewerPointerCount = 0;
   ReadingMode _readingMode = ReadingMode.single;
   bool _invertDocumentColors = false;
-  final Map<int, Future<Uint8List>> _horizontalPageImages =
-      <int, Future<Uint8List>>{};
+  final BoundedPageCache _horizontalPageImages =
+      BoundedPageCache(maxCapacity: 10);
   ReadingPreferenceController? _readingPreference;
   Uint8List? _secondPng;
   double? _secondImageWidthPx;
   double? _secondImageHeightPx;
-  final Map<int, Future<Uint8List>> _verticalPageImages =
-      <int, Future<Uint8List>>{};
+  final BoundedPageCache _verticalPageImages =
+      BoundedPageCache(maxCapacity: 10);
   Offset? _viewerSwipeStart;
   bool _viewerLongPressSelecting = false;
   Timer? _recoveryDebounce;
@@ -302,6 +311,14 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   }
 
   void _reportError(String message, Object error) {
+    ReviewPromptManager.instance.markSessionError();
+    TelemetryManager.instance.captureException(error, null, reason: message);
+    AppDiagnostics.instance.recordError(
+      error,
+      null,
+      category: 'viewer',
+      message: message,
+    );
     if (!mounted) return;
     setState(() => _status = message);
     AppNotice.show(
@@ -1160,6 +1177,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
               )
               .then((_) => _loadRecents()),
         );
+        unawaited(ReviewPromptManager.instance.recordMilestone('save_document'));
+        TelemetryManager.instance.track('save_document_success', {
+          'name': safeName,
+          'pages': _pageCount,
+        });
         if (!mounted) return;
         setState(() {
           _dirty = status.dirty;
@@ -1440,8 +1462,23 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     }
   }
 
+  @override
+  void didHaveMemoryPressure() {
+    super.didHaveMemoryPressure();
+    AppDiagnostics.instance.notifyMemoryPressure();
+    _verticalPageImages.clear();
+    _horizontalPageImages.clear();
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+  }
+
   void _onOperationStatus(bridge.DocumentStatus status) {
     if (!mounted) return;
+    TelemetryManager.instance.track('operation_status', {
+      'pages': status.pageCount,
+      'dirty': status.dirty,
+      'canUndo': status.canUndo.isNotEmpty,
+    });
     AppNotice.dismissAction(context);
     setState(() {
       _pageCount = status.pageCount;
@@ -2939,6 +2976,21 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
 
   Future<void> _launchTask(PdfTask task) async {
     if (_busy || _launchingTask || _engine == null) return;
+    if (!FeatureFlagService.instance.isToolEnabled(task.id)) {
+      final reason = FeatureFlagService.instance.getToolDisabledReason(task.id);
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: reason ?? 'This tool is temporarily unavailable.',
+          kind: NoticeKind.warning,
+        ),
+      );
+      return;
+    }
+    TelemetryManager.instance.track('task_launched', {
+      'task_id': task.id,
+      'title': task.title,
+    });
     setState(() => _launchingTask = true);
     try {
       if (task.needsDocument && _doc == null) {
@@ -3176,6 +3228,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     _viewerTransform.dispose();
     _continuousScroll.dispose();
     _recoveryDebounce?.cancel();
+    _verticalPageImages.dispose();
+    _horizontalPageImages.dispose();
     final engine = _engine;
     final doc = _doc;
     if (engine != null && doc != null) {
@@ -3375,6 +3429,8 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                         break;
                                       case 'open':
                                         _open();
+                                      case 'diagnostics':
+                                        DiagnosticsSheet.show(context);
                                     }
                                   },
                                   itemBuilder: (_) => [
@@ -3403,6 +3459,16 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                           ),
                                           const SizedBox(width: 8),
                                           const Text('Invert page colors'),
+                                        ],
+                                      ),
+                                    ),
+                                    const PopupMenuItem(
+                                      value: 'diagnostics',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.troubleshoot, size: 20),
+                                          SizedBox(width: 8),
+                                          Text('Diagnostics & Logs'),
                                         ],
                                       ),
                                     ),
@@ -4396,6 +4462,12 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                       ),
                     ],
                   ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.troubleshoot, size: 20),
+                  tooltip: 'Diagnostics & Logs',
+                  onPressed: () => DiagnosticsSheet.show(context),
                 ),
               ],
             ),

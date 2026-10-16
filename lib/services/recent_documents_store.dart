@@ -98,6 +98,8 @@ class RecentDocumentsStore {
     }
   }
 
+  static const int _maxCachedBytes = 25 * 1024 * 1024; // 25 MB max per cached recent file
+
   /// Records an opened document and optionally caches its bytes for instant re-opening.
   Future<void> recordOpened({
     required String name,
@@ -107,10 +109,12 @@ class RecentDocumentsStore {
     try {
       final dir = await _recentsDir();
       String? cachedPath;
-      if (dir != null && bytes != null && bytes.isNotEmpty) {
+      if (dir != null && bytes != null && bytes.isNotEmpty && bytes.length <= _maxCachedBytes) {
         final sanitized = name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
         final cachedFile = File('${dir.path}/$sanitized');
-        await cachedFile.writeAsBytes(bytes, flush: true);
+        final tmpFile = File('${cachedFile.path}.tmp');
+        await tmpFile.writeAsBytes(bytes, flush: true);
+        await tmpFile.rename(cachedFile.path);
         cachedPath = cachedFile.path;
       }
 
@@ -141,7 +145,9 @@ class RecentDocumentsStore {
       final manifest = await _manifestFile();
       if (manifest != null) {
         final jsonList = [for (final e in updated) e.toJson()];
-        await manifest.writeAsString(jsonEncode(jsonList), flush: true);
+        final tmpManifest = File('${manifest.path}.tmp');
+        await tmpManifest.writeAsString(jsonEncode(jsonList), flush: true);
+        await tmpManifest.rename(manifest.path);
       }
     } catch (_) {
       // Recent storage is an ergonomic convenience; failure is non-blocking

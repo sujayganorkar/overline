@@ -7,7 +7,7 @@ Cargo.lock.tmp
 .dart_tool/
 .packages
 build/
-dist/apk/
+dist/
 .flutter-plugins
 .flutter-plugins-dependencies
 ios/Pods/
@@ -21,6 +21,11 @@ ios/Flutter/ephemeral/
 # Android
 android/.gradle/
 android/local.properties
+android/key.properties
+android/*.jks
+android/*.keystore
+*.jks
+*.keystore
 android/app/debug
 android/app/profile
 android/app/release

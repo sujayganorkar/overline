@@ -64,22 +64,54 @@ jobs:
       - name: Build release APK (same script as local pre-push)
         run: tools/build-apk.sh
 
-      - name: Name APK by source commit
-        id: apk
+      - name: Build release App Bundle (Play Store submission package)
+        run: tools/build-bundle.sh
+
+      - name: Name artifacts by source commit
+        id: artifacts
         run: |
           APK="dist/apk/PdfCraft-Mobile-${GITHUB_SHA:0:12}.apk"
           cp dist/apk/PdfCraft-Mobile-latest.apk "$APK"
           sha256sum "$APK" > "$APK.sha256"
-          echo "path=$APK" >> "$GITHUB_OUTPUT"
-          echo "## Android test APK" >> "$GITHUB_STEP_SUMMARY"
-          echo "Built from commit \`${GITHUB_SHA}\` (Android ARM64 + x86_64). Download the APK from this run's Artifacts section." >> "$GITHUB_STEP_SUMMARY"
+          echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
+
+          AAB="dist/bundle/PdfCraft-Mobile-${GITHUB_SHA:0:12}.aab"
+          cp dist/bundle/PdfCraft-Mobile-release.aab "$AAB"
+          sha256sum "$AAB" > "$AAB.sha256"
+          echo "aab_path=$AAB" >> "$GITHUB_OUTPUT"
+
+          echo "## Release Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Built from commit \`${GITHUB_SHA}\` (Android ARM64 + x86_64)." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Download APK for sideloading/direct testing." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Download AAB for Google Play Store upload." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload downloadable APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-Mobile-${{ github.sha }}
+          name: PdfCraft-Mobile-APK-${{ github.sha }}
           path: |
-            ${{ steps.apk.outputs.path }}
-            ${{ steps.apk.outputs.path }}.sha256
+            ${{ steps.artifacts.outputs.apk_path }}
+            ${{ steps.artifacts.outputs.apk_path }}.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload Google Play App Bundle (.aab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PdfCraft-Mobile-Bundle-${{ github.sha }}
+          path: |
+            ${{ steps.artifacts.outputs.aab_path }}
+            ${{ steps.artifacts.outputs.aab_path }}.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload ProGuard mapping and native debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: PdfCraft-Mobile-Symbols-${{ github.sha }}
+          path: |
+            dist/bundle/mapping.txt
+            dist/bundle/native-debug-symbols.zip
+            dist/bundle/release-info.txt
+          if-no-files-found: warn
+          retention-days: 90
