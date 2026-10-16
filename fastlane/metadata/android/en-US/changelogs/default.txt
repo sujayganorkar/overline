@@ -1,0 +1,6 @@
+• Production release of PdfCraft Mobile with high-performance native Rust PDF engine.
+• Complete offline PDF reading, markup, threaded notes, and digital signing.
+• Powerful tools: Split, Merge, Rotate, Reorder, OCR, and Target-Size Compression.
+• Offline security hardening: Obfuscated signature storage and sandboxed document processing.
+• Memory governance: Adaptive LRU page caching and OS trim-memory response.
+• Material Design 3 interface with dark mode and inverted high-contrast reading.

@@ -1,0 +1,36 @@
+PdfCraft is the modern, privacy-first PDF reader, editor, and signer engineered for speed and uncompromising data sovereignty. Powered by a high-performance native Rust core, PdfCraft handles large documents, complex forms, and multi-page annotations entirely on your device—with zero cloud uploads, zero tracking, and no subscriptions.
+
+🔒 100% OFFLINE & PRIVATE
+• Your files never leave your device. All rendering, editing, and saving happen locally in sandboxed memory.
+• No account registration, no telemetry spying, no third-party cloud uploads.
+• Digital signatures are stored encrypted at rest on your local device.
+
+⚡ BLAZING-FAST NATIVE PERFORMANCE
+• Engineered with a native Rust core engine for instant page rendering and butter-smooth zooming.
+• Memory-optimized LRU page streaming ensures smooth scrolling even on massive, image-heavy documents.
+• Native 64-bit architecture built for modern Android devices.
+
+✍️ ANNOTATE, MARKUP & COMMENT
+• Highlight, underline, strikethrough, and add colorful freehand ink notes.
+• Add threaded page comments with status tracking (open/resolved).
+• Insert shapes, text boxes, and stamps directly onto the page.
+
+📝 FILL & SIGN FORMS
+• Draw smooth, pressure-sensitive signatures or import signature images.
+• Reuse saved signatures securely across contracts, agreements, and tax documents.
+• Flatten annotations and signatures before sharing to prevent tampering.
+
+🛠️ POWERFUL PDF TOOLBOX
+• Merge & Split: Combine multiple PDFs or extract selected page ranges into fresh documents.
+• Page Organizer: Reorder, rotate, and delete pages with an intuitive visual grid.
+• Target File Size Compression: Compress oversized PDFs to exact target file sizes (e.g. under 2MB for portal uploads).
+• Convert Images to PDF: Snap photos of documents and convert them into crisp, standardized PDFs.
+• On-Device OCR: Extract text from scanned documents locally.
+
+📖 DESIGNED FOR READING COMFORT
+• Material Design 3 interface with dynamic theming.
+• System, Light, Dark, and High-Contrast Inverted reading modes.
+• Horizontal and Vertical reading modes with quick jump sliders.
+• Transparent in-app diagnostics and system health monitor.
+
+PdfCraft gives you complete control over your PDF workflow without sacrificing privacy.
