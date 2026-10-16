@@ -209,6 +209,7 @@ class _CropPageState extends State<CropPage> {
                 );
                 final width = _imageWidth * scale;
                 final height = _imageHeight * scale;
+                final box = _box();
                 return Listener(
                   onPointerDown: (_) => setState(() => _pointerCount++),
                   onPointerUp: (_) => setState(() => _pointerCount = math.max(0, _pointerCount - 1)),
