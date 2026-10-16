@@ -245,54 +245,59 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
                 final width = _imageWidth * scale;
                 final height = _imageHeight * scale;
                 final displayedSize = Size(width, height);
-                return Center(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapUp: (details) =>
-                        _selectPosition(details.localPosition, displayedSize),
-                    child: SizedBox(
-                      width: width,
-                      height: height,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Image.memory(_png, fit: BoxFit.fill),
-                          if (_draftImagePosition case final position?)
-                            Positioned(
-                              left: position.dx * width / _imageWidth,
-                              top: position.dy * height / _imageHeight,
-                              child: Transform.translate(
-                                offset: const Offset(-8, -24),
-                                child: IgnorePointer(
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .tertiaryContainer,
-                                      borderRadius: BorderRadius.circular(5),
-                                      border: Border.all(
+                return InteractiveViewer(
+                  minScale: 1.0,
+                  maxScale: 6.0,
+                  clipBehavior: Clip.hardEdge,
+                  child: Center(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapUp: (details) =>
+                          _selectPosition(details.localPosition, displayedSize),
+                      child: SizedBox(
+                        width: width,
+                        height: height,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.memory(_png, fit: BoxFit.fill),
+                            if (_draftImagePosition case final position?)
+                              Positioned(
+                                left: position.dx * width / _imageWidth,
+                                top: position.dy * height / _imageHeight,
+                                child: Transform.translate(
+                                  offset: const Offset(-8, -24),
+                                  child: IgnorePointer(
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
                                         color: Theme.of(context)
                                             .colorScheme
-                                            .tertiary,
+                                            .tertiaryContainer,
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .tertiary,
+                                        ),
                                       ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 3,
-                                      ),
-                                      child: Text(
-                                        _datePreview ?? '',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelMedium,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 3,
+                                        ),
+                                        child: Text(
+                                          _datePreview ?? '',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelMedium,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

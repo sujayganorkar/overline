@@ -45,6 +45,7 @@ class _CropPageState extends State<CropPage> {
   Offset? _boxEnd;
   bool _busy = false;
   String? _error;
+  int _pointerCount = 0;
 
   @override
   void initState() {
@@ -208,74 +209,83 @@ class _CropPageState extends State<CropPage> {
                 );
                 final width = _imageWidth * scale;
                 final height = _imageHeight * scale;
-                final box = _box();
-                return Center(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: _busy
-                        ? null
-                        : (details) => setState(() {
-                            // Display pixels → source pixels so the engine
-                            // receives top-left points, not screen positions.
-                            _boxStart = _pagePoint(
-                              details.localPosition,
-                              scale,
-                            );
-                            _boxEnd = _pagePoint(details.localPosition, scale);
-                            _error = null;
-                          }),
-                    onPanUpdate: _busy
-                        ? null
-                        : (details) => setState(
-                            () => _boxEnd = _pagePoint(
-                              details.localPosition,
-                              scale,
-                            ),
-                          ),
-                    onPanCancel: () => setState(() {
-                      _boxStart = null;
-                      _boxEnd = null;
-                    }),
-                    child: SizedBox(
-                      width: width,
-                      height: height,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Image.memory(
-                            _png,
-                            fit: BoxFit.fill,
-                            semanticLabel: 'Page $_page preview for cropping',
-                          ),
-                          if (box != null)
-                            Positioned.fromRect(
-                              rect: Rect.fromLTRB(
-                                box.left * scale,
-                                box.top * scale,
-                                box.right * scale,
-                                box.bottom * scale,
+                return Listener(
+                  onPointerDown: (_) => setState(() => _pointerCount++),
+                  onPointerUp: (_) => setState(() => _pointerCount = math.max(0, _pointerCount - 1)),
+                  onPointerCancel: (_) => setState(() => _pointerCount = math.max(0, _pointerCount - 1)),
+                  child: InteractiveViewer(
+                    minScale: 1.0,
+                    maxScale: 5.0,
+                    panEnabled: _pointerCount >= 2,
+                    scaleEnabled: true,
+                    clipBehavior: Clip.hardEdge,
+                    child: Center(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: _busy || _pointerCount >= 2
+                            ? null
+                            : (details) => setState(() {
+                                _boxStart = _pagePoint(
+                                  details.localPosition,
+                                  scale,
+                                );
+                                _boxEnd = _pagePoint(details.localPosition, scale);
+                                _error = null;
+                              }),
+                        onPanUpdate: _busy || _pointerCount >= 2
+                            ? null
+                            : (details) => setState(
+                                () => _boxEnd = _pagePoint(
+                                  details.localPosition,
+                                  scale,
+                                ),
                               ),
-                              child: Semantics(
-                                label: 'Selected crop area',
-                                child: IgnorePointer(
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary
-                                          .withValues(alpha: 0.15),
-                                      border: Border.all(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                        width: 2,
+                        onPanCancel: () => setState(() {
+                          _boxStart = null;
+                          _boxEnd = null;
+                        }),
+                        child: SizedBox(
+                          width: width,
+                          height: height,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.memory(
+                                _png,
+                                fit: BoxFit.fill,
+                                semanticLabel: 'Page $_page preview for cropping',
+                              ),
+                              if (box != null)
+                                Positioned.fromRect(
+                                  rect: Rect.fromLTRB(
+                                    box.left * scale,
+                                    box.top * scale,
+                                    box.right * scale,
+                                    box.bottom * scale,
+                                  ),
+                                  child: Semantics(
+                                    label: 'Selected crop area',
+                                    child: IgnorePointer(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withValues(alpha: 0.15),
+                                          border: Border.all(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            width: 2,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),

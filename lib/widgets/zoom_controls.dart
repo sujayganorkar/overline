@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Floating zoom controls providing accessible single-pointer Zoom In,
 /// Zoom Out, and Reset Zoom to 100% (fit scale) without requiring
@@ -24,6 +25,7 @@ class ZoomControlsHud extends StatelessWidget {
     final currentScale = current.getMaxScaleOnAxis();
     final targetScale = (currentScale * factor).clamp(minScale, maxScale);
     if ((targetScale - currentScale).abs() < 0.01) return;
+    HapticFeedback.selectionClick();
     final scaleRatio = targetScale / currentScale;
 
     final viewportSize = viewportSizeProvider?.call() ?? this.viewportSize;
@@ -46,6 +48,7 @@ class ZoomControlsHud extends StatelessWidget {
   }
 
   void _resetZoom() {
+    HapticFeedback.selectionClick();
     transformController.value = Matrix4.identity();
   }
 

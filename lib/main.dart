@@ -193,7 +193,8 @@ class ViewerPage extends StatefulWidget {
 
 enum DocumentInteractionMode { read, markup, sign }
 
-class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
+class _ViewerPageState extends State<ViewerPage>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   PdfEngineApi? _engine;
   int? _doc;
   int _pageCount = 0;
@@ -225,6 +226,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   Offset? _doubleTapPosition;
   bool _swipeStartedAtFit = false;
   final TransformationController _viewerTransform = TransformationController();
+  AnimationController? _zoomAnimationController;
   final GlobalKey _viewerPageKey = GlobalKey();
   final GlobalKey _readerViewportKey = GlobalKey();
   final ScrollController _continuousScroll = ScrollController();
@@ -232,6 +234,25 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   int _viewerPointerCount = 0;
   ReadingMode _readingMode = ReadingMode.single;
   bool _invertDocumentColors = false;
+
+  void _animateViewerTransform(Matrix4 target) {
+    HapticFeedback.lightImpact();
+    _zoomAnimationController?.stop();
+    _zoomAnimationController?.dispose();
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _zoomAnimationController = controller;
+    final start = _viewerTransform.value;
+    final animation = Matrix4Tween(begin: start, end: target).animate(
+      CurvedAnimation(parent: controller, curve: Curves.easeOutCubic),
+    );
+    animation.addListener(() {
+      _viewerTransform.value = animation.value;
+    });
+    controller.forward();
+  }
   final BoundedPageCache _horizontalPageImages =
       BoundedPageCache(maxCapacity: 10);
   ReadingPreferenceController? _readingPreference;
@@ -774,11 +795,14 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
         _continuousExtent = axis == Axis.vertical
             ? constraints.maxHeight
             : constraints.maxWidth;
+        final isZoomed = _viewerTransform.value.getMaxScaleOnAxis() > 1.05;
         return InteractiveViewer(
           key: _readerViewportKey,
           transformationController: _viewerTransform,
           minScale: 1,
           maxScale: 8,
+          panEnabled: isZoomed,
+          scaleEnabled: true,
           child: NotificationListener<ScrollEndNotification>(
             onNotification: (_) {
               if (_continuousScroll.hasClients) {
@@ -929,7 +953,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
     if (_readingMode == ReadingMode.doublePage && _swipeStartedAtFit) {
       final step = delta.dx < 0 ? 2 : -2;
       final destination = (_page + step).clamp(1, _pageCount);
-      if (destination != _page) unawaited(_goto(destination));
+      if (destination != _page) {
+        HapticFeedback.selectionClick();
+        unawaited(_goto(destination));
+      }
       return;
     }
     final destination = pageForSwipe(
@@ -938,7 +965,10 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
       pageCount: _pageCount,
       scale: _viewerTransform.value.getMaxScaleOnAxis(),
     );
-    if (destination != null) unawaited(_goto(destination));
+    if (destination != null) {
+      HapticFeedback.selectionClick();
+      unawaited(_goto(destination));
+    }
   }
 
   void _beginTextSelection(Offset pageLocalPosition, double fitScale) {
@@ -3225,6 +3255,7 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _zoomAnimationController?.dispose();
     _viewerTransform.dispose();
     _continuousScroll.dispose();
     _recoveryDebounce?.cancel();
@@ -3649,9 +3680,9 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                               key: _readerViewportKey,
                               transformationController: _viewerTransform,
                               panEnabled:
-                                  _canvasMode == DocumentInteractionMode.read,
-                              scaleEnabled:
-                                  _canvasMode == DocumentInteractionMode.read,
+                                  _canvasMode == DocumentInteractionMode.read ||
+                                      _viewerPointerCount >= 2,
+                              scaleEnabled: true,
                               onInteractionUpdate: (_) {
                                 if (_viewerTransform.value.getMaxScaleOnAxis() >
                                     1.05) {
@@ -3684,85 +3715,86 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                         );
                                       }
                                     },
-                                    onTapDown: (details) {
-                                      if (_canvasMode ==
-                                          DocumentInteractionMode.sign) {
-                                        setState(() {
-                                          _draftSignaturePositionPx = Offset(
-                                            (details.localPosition.dx /
-                                                    fitScale)
-                                                .clamp(
-                                                  0.0,
-                                                  (sourceWidth -
-                                                          _draftSignatureWidthPx)
-                                                      .clamp(0.0, sourceWidth),
-                                                ),
-                                            (details.localPosition.dy /
-                                                    fitScale)
-                                                .clamp(
-                                                  0.0,
-                                                  (sourceHeight -
-                                                          _draftSignatureHeightPx)
-                                                      .clamp(0.0, sourceHeight),
-                                                ),
-                                          );
-                                        });
-                                      }
-                                    },
-                                    onPanStart: (details) {
-                                      if (_canvasMode ==
-                                          DocumentInteractionMode.markup) {
-                                        final local = Offset(
-                                          (details.localPosition.dx / fitScale)
-                                              .clamp(0.0, sourceWidth),
-                                          (details.localPosition.dy / fitScale)
-                                              .clamp(0.0, sourceHeight),
-                                        );
-                                        setState(() {
-                                          _activeStroke = [local];
-                                        });
-                                      }
-                                    },
-                                    onPanUpdate: (details) {
-                                      if (_canvasMode ==
-                                          DocumentInteractionMode.markup) {
-                                        final local = Offset(
-                                          (details.localPosition.dx / fitScale)
-                                              .clamp(0.0, sourceWidth),
-                                          (details.localPosition.dy / fitScale)
-                                              .clamp(0.0, sourceHeight),
-                                        );
-                                        setState(() {
-                                          _activeStroke.add(local);
-                                        });
-                                      }
-                                    },
-                                    onPanEnd: (_) {
-                                      if (_canvasMode ==
-                                              DocumentInteractionMode.markup &&
-                                          _activeStroke.length > 1) {
-                                        setState(() {
-                                          final isHighlighter =
-                                              _markupTool == 'highlighter';
-                                          _canvasStrokes.add(
-                                            annotation_geo.InkStroke(
-                                              points: [
-                                                for (final p in _activeStroke)
-                                                  annotation_geo.Point(
-                                                    p.dx,
-                                                    p.dy,
+                                    onTapDown: _canvasMode ==
+                                            DocumentInteractionMode.sign
+                                        ? (details) {
+                                            setState(() {
+                                              _draftSignaturePositionPx = Offset(
+                                                (details.localPosition.dx /
+                                                        fitScale)
+                                                    .clamp(
+                                                      0.0,
+                                                      (sourceWidth -
+                                                              _draftSignatureWidthPx)
+                                                          .clamp(0.0, sourceWidth),
+                                                    ),
+                                                (details.localPosition.dy /
+                                                        fitScale)
+                                                    .clamp(
+                                                      0.0,
+                                                      (sourceHeight -
+                                                              _draftSignatureHeightPx)
+                                                          .clamp(0.0, sourceHeight),
+                                                    ),
+                                              );
+                                            });
+                                          }
+                                        : null,
+                                    onPanStart: _canvasMode ==
+                                            DocumentInteractionMode.markup
+                                        ? (details) {
+                                            final local = Offset(
+                                              (details.localPosition.dx / fitScale)
+                                                  .clamp(0.0, sourceWidth),
+                                              (details.localPosition.dy / fitScale)
+                                                  .clamp(0.0, sourceHeight),
+                                            );
+                                            setState(() {
+                                              _activeStroke = [local];
+                                            });
+                                          }
+                                        : null,
+                                    onPanUpdate: _canvasMode ==
+                                            DocumentInteractionMode.markup
+                                        ? (details) {
+                                            final local = Offset(
+                                              (details.localPosition.dx / fitScale)
+                                                  .clamp(0.0, sourceWidth),
+                                              (details.localPosition.dy / fitScale)
+                                                  .clamp(0.0, sourceHeight),
+                                            );
+                                            setState(() {
+                                              _activeStroke.add(local);
+                                            });
+                                          }
+                                        : null,
+                                    onPanEnd: _canvasMode ==
+                                            DocumentInteractionMode.markup
+                                        ? (_) {
+                                            if (_activeStroke.length > 1) {
+                                              setState(() {
+                                                final isHighlighter =
+                                                    _markupTool == 'highlighter';
+                                                _canvasStrokes.add(
+                                                  annotation_geo.InkStroke(
+                                                    points: [
+                                                      for (final p in _activeStroke)
+                                                        annotation_geo.Point(
+                                                          p.dx,
+                                                          p.dy,
+                                                        ),
+                                                    ],
+                                                    color: _markupColor,
+                                                    width: isHighlighter
+                                                        ? 14.0
+                                                        : _markupWidth,
                                                   ),
-                                              ],
-                                              color: _markupColor,
-                                              width: isHighlighter
-                                                  ? 14.0
-                                                  : _markupWidth,
-                                            ),
-                                          );
-                                          _activeStroke = [];
-                                        });
-                                      }
-                                    },
+                                                );
+                                                _activeStroke = [];
+                                              });
+                                            }
+                                          }
+                                        : null,
                                     onDoubleTapDown: (details) =>
                                         _doubleTapPosition =
                                             details.localPosition,
@@ -3776,9 +3808,11 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                       final currentScale = _viewerTransform
                                           .value
                                           .getMaxScaleOnAxis();
+                                      HapticFeedback.selectionClick();
                                       if (currentScale > 1.05) {
-                                        _viewerTransform.value =
-                                            Matrix4.identity();
+                                        _animateViewerTransform(
+                                          Matrix4.identity(),
+                                        );
                                       } else {
                                         const targetScale = 2.5;
                                         final focal = _doubleTapPosition!;
@@ -3811,20 +3845,21 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                                           minDy,
                                           0.0,
                                         );
-                                        _viewerTransform.value =
-                                            Matrix4.identity()
-                                              ..translateByDouble(
-                                                clampedDx,
-                                                clampedDy,
-                                                0,
-                                                1,
-                                              )
-                                              ..scaleByDouble(
-                                                targetScale,
-                                                targetScale,
-                                                1,
-                                                1,
-                                              );
+                                        _animateViewerTransform(
+                                          Matrix4.identity()
+                                            ..translateByDouble(
+                                              clampedDx,
+                                              clampedDy,
+                                              0,
+                                              1,
+                                            )
+                                            ..scaleByDouble(
+                                              targetScale,
+                                              targetScale,
+                                              1,
+                                              1,
+                                            ),
+                                        );
                                       }
                                     },
                                     onLongPressStart: (details) {
@@ -4623,6 +4658,92 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 24),
 
+            if (_recentDocuments.isNotEmpty) ...[
+              Text(
+                'Recent documents',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                elevation: 0,
+                color: colorScheme.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < _recentDocuments.length; i++) ...[
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            indent: 56,
+                            color: colorScheme.outlineVariant.withValues(
+                              alpha: 0.3,
+                            ),
+                          ),
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 4,
+                          ),
+                          leading: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: colorScheme.secondaryContainer.withValues(
+                                alpha: 0.5,
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.description_outlined,
+                              size: 20,
+                              color: colorScheme.secondary,
+                            ),
+                          ),
+                          title: Text(
+                            _recentDocuments[i].name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                          subtitle: Text(
+                            '${_recentDocuments[i].pageCount} ${_recentDocuments[i].pageCount == 1 ? 'page' : 'pages'}',
+                          ),
+                          onTap: enabled
+                              ? () => _openRecent(_recentDocuments[i])
+                              : null,
+                          trailing: PopupMenuButton<String>(
+                            tooltip: 'Options for ${_recentDocuments[i].name}',
+                            onSelected: (_) async {
+                              await _recentStore.removeRecent(
+                                _recentDocuments[i].name,
+                              );
+                              await _loadRecents();
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
+                                value: 'remove',
+                                child: Text('Remove from recents'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
             Text(
               'Popular tools',
               style: theme.textTheme.titleMedium?.copyWith(
@@ -4734,92 +4855,6 @@ class _ViewerPageState extends State<ViewerPage> with WidgetsBindingObserver {
                           onPressed: _initEngine,
                           child: const Text('Try again'),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-
-            if (_recentDocuments.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Recent documents',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Card(
-                elevation: 0,
-                color: colorScheme.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(
-                    color: colorScheme.outlineVariant.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < _recentDocuments.length; i++) ...[
-                        if (i > 0)
-                          Divider(
-                            height: 1,
-                            indent: 56,
-                            color: colorScheme.outlineVariant.withValues(
-                              alpha: 0.3,
-                            ),
-                          ),
-                        ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 4,
-                          ),
-                          leading: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: colorScheme.secondaryContainer.withValues(
-                                alpha: 0.5,
-                              ),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              Icons.description_outlined,
-                              size: 20,
-                              color: colorScheme.secondary,
-                            ),
-                          ),
-                          title: Text(
-                            _recentDocuments[i].name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                          ),
-                          subtitle: Text(
-                            '${_recentDocuments[i].pageCount} ${_recentDocuments[i].pageCount == 1 ? 'page' : 'pages'}',
-                          ),
-                          onTap: enabled
-                              ? () => _openRecent(_recentDocuments[i])
-                              : null,
-                          trailing: PopupMenuButton<String>(
-                            tooltip: 'Options for ${_recentDocuments[i].name}',
-                            onSelected: (_) async {
-                              await _recentStore.removeRecent(
-                                _recentDocuments[i].name,
-                              );
-                              await _loadRecents();
-                            },
-                            itemBuilder: (_) => [
-                              const PopupMenuItem(
-                                value: 'remove',
-                                child: Text('Remove from recents'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),

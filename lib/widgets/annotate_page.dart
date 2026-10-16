@@ -1517,9 +1517,11 @@ class _AnnotatePageState extends State<AnnotatePage> {
                               _cancelTouchDraft();
                             },
                             child: InteractiveViewer(
-                              panEnabled: _mode == AnnotateMode.pan && !_saving,
-                              scaleEnabled:
-                                  _mode == AnnotateMode.pan && !_saving,
+                              panEnabled:
+                                  (_mode == AnnotateMode.pan ||
+                                          !_touch.canEdit) &&
+                                      !_saving,
+                              scaleEnabled: !_saving,
                               constrained: true,
                               minScale: 1,
                               maxScale: 8,

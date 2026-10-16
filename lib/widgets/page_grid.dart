@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app_notice.dart';
 
@@ -44,6 +45,8 @@ class _PageGridState extends State<PageGrid> {
   late int _pageCount = widget.pageCount;
   final Set<int> _selectedPages = {};
   List<int> _reorderOrder = const [];
+  int _columns = 3;
+  double _baseScale = 1.0;
 
   bool get _selecting => _selectedPages.isNotEmpty;
   List<int> get _orderedPages => _reorderOrder.length == _pageCount
@@ -484,6 +487,7 @@ class _PageGridState extends State<PageGrid> {
   }
 
   void _toggleSelected(int page) {
+    HapticFeedback.selectionClick();
     setState(() {
       if (!_selectedPages.add(page)) _selectedPages.remove(page);
     });
@@ -588,12 +592,30 @@ class _PageGridState extends State<PageGrid> {
                               : () => setState(() => _reordering = false),
                           child: const Text('Done'),
                         ),
-                      if (!_selecting && !_reordering)
+                      if (!_selecting && !_reordering) ...[
+                        IconButton(
+                          tooltip: 'Grid columns ($_columns)',
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              _columns =
+                                  _columns == 2 ? 3 : (_columns == 3 ? 4 : 2);
+                            });
+                          },
+                          icon: Icon(
+                            _columns == 2
+                                ? Icons.grid_view
+                                : (_columns == 3
+                                    ? Icons.view_comfy_outlined
+                                    : Icons.view_compact_outlined),
+                          ),
+                        ),
                         TextButton.icon(
                           onPressed: _busy ? null : _insertMenu,
                           icon: const Icon(Icons.add),
                           label: const Text('Insert'),
                         ),
+                      ],
                       IconButton(
                         onPressed: () => Navigator.pop(context),
                         icon: const Icon(Icons.close),
@@ -683,15 +705,35 @@ class _PageGridState extends State<PageGrid> {
                         );
                       },
                     )
-                  : GridView.builder(
-                      padding: const EdgeInsets.all(12),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 0.72,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                          ),
+                  : GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onScaleStart: (_) => _baseScale = 1.0,
+                      onScaleUpdate: (details) {
+                        if (details.pointerCount >= 2) {
+                          if (details.scale > 1.35 && _columns > 2) {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              _columns--;
+                              _baseScale = details.scale;
+                            });
+                          } else if (details.scale < 0.70 && _columns < 4) {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              _columns++;
+                              _baseScale = details.scale;
+                            });
+                          }
+                        }
+                      },
+                      child: GridView.builder(
+                        padding: const EdgeInsets.all(12),
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: _columns,
+                              childAspectRatio: 0.72,
+                              crossAxisSpacing: 8,
+                              mainAxisSpacing: 8,
+                            ),
                       itemCount: _pageCount,
                       itemBuilder: (context, index) {
                         final page = _orderedPages[index];
@@ -819,6 +861,7 @@ class _PageGridState extends State<PageGrid> {
                         );
                       },
                     ),
+                  ),
             ),
             if (_selecting)
               Material(
