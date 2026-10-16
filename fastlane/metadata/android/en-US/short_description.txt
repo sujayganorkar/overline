@@ -1,1 +1,2 @@
 Fast, private, offline PDF editor & signer powered by a native Rust engine.
+

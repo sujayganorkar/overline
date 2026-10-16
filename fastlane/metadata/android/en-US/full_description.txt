@@ -34,3 +34,4 @@ PdfCraft is the modern, privacy-first PDF reader, editor, and signer engineered 
 • Transparent in-app diagnostics and system health monitor.
 
 PdfCraft gives you complete control over your PDF workflow without sacrificing privacy.
+

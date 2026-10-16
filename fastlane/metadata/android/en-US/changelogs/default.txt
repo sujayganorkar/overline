@@ -4,3 +4,4 @@
 • Offline security hardening: Obfuscated signature storage and sandboxed document processing.
 • Memory governance: Adaptive LRU page caching and OS trim-memory response.
 • Material Design 3 interface with dark mode and inverted high-contrast reading.
+

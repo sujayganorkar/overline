@@ -37,3 +37,4 @@ PdfCraft Mobile ("the Application") is built with an offline-first architecture 
 
 ### 8. Contact
 - For privacy inquiries or questions, open an issue on the PdfCraft Mobile repository or contact the maintainers.
+

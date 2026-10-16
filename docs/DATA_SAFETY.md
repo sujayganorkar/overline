@@ -40,3 +40,4 @@ Use the answers below when completing the **Data Safety** section in Google Play
 - `android:allowBackup="false"` prevents unencrypted cloud backups of user PDFs, annotations, and signatures to third-party Google drive backups.
 - `android:usesCleartextTraffic="false"` enforces HTTPS for any outbound network connections.
 - Persistable URI permissions (`FLAG_GRANT_READ_URI_PERMISSION`) ensure least-privilege access to user-selected documents without broad filesystem scanning.
+
