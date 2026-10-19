@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.pdfcraft.pdfcraft_mobile"
+    namespace = "app.overline.pdf"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -18,8 +18,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.pdfcraft.pdfcraft_mobile"
+        applicationId = "app.overline.pdf"
         ndk {
             // The PdfCraft bridge is built for these ABIs. Avoid APKs that contain Flutter but
             // lack the Rust library, which would fail only at runtime on older ARMv7 devices.

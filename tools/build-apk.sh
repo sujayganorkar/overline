@@ -39,7 +39,7 @@ if missing:
 armv7 = sorted(entry for entry in entries if entry.startswith("lib/armeabi-v7a/"))
 if armv7:
     raise SystemExit("APK contains unsupported ARMv7 native libraries: " + ", ".join(armv7))
-print("APK contains PdfCraft native libraries for ARM64 and x86_64 only.")
+print("APK contains Overline native libraries for ARM64 and x86_64 only.")
 PY
 
 short_sha="$(git rev-parse --short=12 HEAD)"
@@ -47,7 +47,7 @@ worktree_state=clean
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
     worktree_state=dirty
 fi
-output="$ROOT/dist/apk/PdfCraft-Mobile-latest.apk"
+output="$ROOT/dist/apk/Overline-latest.apk"
 mkdir -p "$(dirname "$output")"
 cp build/app/outputs/flutter-apk/app-release.apk "$output.tmp"
 mv "$output.tmp" "$output"

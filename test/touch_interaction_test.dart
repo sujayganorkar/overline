@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/annotate_page.dart';
-import 'package:pdfcraft_mobile/widgets/touch_session.dart';
+import 'package:overline/widgets/annotate_page.dart';
+import 'package:overline/widgets/touch_session.dart';
 
 import 'viewer_initialization_test.dart' show FakePdfEngine;
 

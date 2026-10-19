@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/comments_screen.dart';
+import 'package:overline/widgets/comments_screen.dart';
 
 void main() {
   test('comment thread parses engine list output with nested replies', () {

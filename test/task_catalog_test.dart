@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/task_catalog.dart';
+import 'package:overline/widgets/task_catalog.dart';
 
 void main() {
   testWidgets('search finds a specific tool and returns its task identity', (

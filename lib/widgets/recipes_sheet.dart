@@ -276,7 +276,7 @@ class _RecipesSheetState extends State<RecipesSheet> {
       builder: (context) => AlertDialog(
         title: const Text('Find phone numbers'),
         content: const Text(
-          'PdfCraft will place reversible redaction marks over phone-number matches. Review the marks on the page; nothing is removed until you choose Apply redactions.',
+          'Overline will place reversible redaction marks over phone-number matches. Review the marks on the page; nothing is removed until you choose Apply redactions.',
         ),
         actions: [
           TextButton(

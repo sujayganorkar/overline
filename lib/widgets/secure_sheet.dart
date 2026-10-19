@@ -488,7 +488,7 @@ class _SecureSheetState extends State<SecureSheet> {
                         {},
                         confirm: true,
                         confirmTitle: 'Apply redactions?',
-                        confirmBody: 'Covered content is removed for good. PdfCraft checks that marked text is no longer readable. Save afterwards to keep the changes.',
+                        confirmBody: 'Covered content is removed for good. Overline checks that marked text is no longer readable. Save afterwards to keep the changes.',
                         closeAfterSuccess: true,
                       ),
               ),

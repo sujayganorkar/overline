@@ -1,4 +1,4 @@
-PdfCraft is the modern, privacy-first PDF reader, editor, and signer engineered for speed and uncompromising data sovereignty. Powered by a high-performance native Rust core, PdfCraft handles large documents, complex forms, and multi-page annotations entirely on your device—with zero cloud uploads, zero tracking, and no subscriptions.
+Overline is the modern, privacy-first PDF reader, editor, and signer engineered for speed and uncompromising data sovereignty. Powered by a high-performance native Rust core, Overline handles large documents, complex forms, and multi-page annotations entirely on your device—with zero cloud uploads, zero tracking, and no subscriptions.
 
 🔒 100% OFFLINE & PRIVATE
 • Your files never leave your device. All rendering, editing, and saving happen locally in sandboxed memory.
@@ -33,5 +33,5 @@ PdfCraft is the modern, privacy-first PDF reader, editor, and signer engineered 
 • Horizontal and Vertical reading modes with quick jump sliders.
 • Transparent in-app diagnostics and system health monitor.
 
-PdfCraft gives you complete control over your PDF workflow without sacrificing privacy.
+Overline gives you complete control over your PDF workflow without sacrificing privacy.
 

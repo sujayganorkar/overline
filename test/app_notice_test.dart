@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/app_notice.dart';
+import 'package:overline/widgets/app_notice.dart';
 
 void main() {
   late BuildContext source;

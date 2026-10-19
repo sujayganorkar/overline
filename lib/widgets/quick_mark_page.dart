@@ -82,7 +82,7 @@ class _QuickMarkPageState extends State<QuickMarkPage> {
       final data = jsonDecode(source);
       final today = data is Map<String, dynamic> ? data['today'] : null;
       if (today is! String || today.isEmpty) {
-        throw StateError('Could not read today’s date from PdfCraft');
+        throw StateError('Could not read today’s date from Overline');
       }
       if (mounted) setState(() => _datePreview = today);
     } catch (error) {

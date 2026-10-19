@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/reader_controls.dart';
+import 'package:overline/widgets/reader_controls.dart';
 
 void main() {
   testWidgets('page slider and zoom are on demand and slider commits once', (

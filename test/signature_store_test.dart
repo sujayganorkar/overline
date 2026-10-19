@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/services/signature_store.dart';
+import 'package:overline/services/signature_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

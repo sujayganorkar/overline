@@ -51,13 +51,13 @@ if missing:
 armv7 = sorted(entry for entry in entries if "armeabi-v7a" in entry)
 if armv7:
     raise SystemExit("AAB contains unsupported ARMv7 native libraries: " + ", ".join(armv7))
-print("AAB verified: Contains 64-bit PdfCraft native libraries (arm64-v8a & x86_64).")
+print("AAB verified: Contains 64-bit Overline native libraries (arm64-v8a & x86_64).")
 PY
 
 dist_dir="$ROOT/dist/bundle"
 mkdir -p "$dist_dir"
 
-output="$dist_dir/PdfCraft-Mobile-release.aab"
+output="$dist_dir/Overline-release.aab"
 cp build/app/outputs/bundle/release/app-release.aab "$output.tmp"
 mv "$output.tmp" "$output"
 

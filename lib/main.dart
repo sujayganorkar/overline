@@ -52,11 +52,13 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   AppDiagnostics.installGlobalErrorHandlers();
   await FeatureFlagService.instance.initialize();
-  runApp(const PdfCraftApp());
+  runApp(const OverlineApp());
 }
 
-class PdfCraftApp extends StatefulWidget {
-  const PdfCraftApp({
+typedef PdfCraftApp = OverlineApp;
+
+class OverlineApp extends StatefulWidget {
+  const OverlineApp({
     super.key,
     this.engineFactory = createPdfCraftEngine,
     this.initialDocumentBytes,
@@ -68,10 +70,10 @@ class PdfCraftApp extends StatefulWidget {
   final String? initialDocumentName;
 
   @override
-  State<PdfCraftApp> createState() => _PdfCraftAppState();
+  State<OverlineApp> createState() => _OverlineAppState();
 }
 
-class _PdfCraftAppState extends State<PdfCraftApp> {
+class _OverlineAppState extends State<OverlineApp> {
   ThemePreferenceController? _theme;
   ReadingPreferenceController? _reading;
 
@@ -132,7 +134,7 @@ class _PdfCraftAppState extends State<PdfCraftApp> {
       child: PdfCraftThemeScope(
         controller: controller,
         child: MaterialApp(
-          title: 'PdfCraft Mobile',
+          title: 'Overline',
           navigatorObservers: [NoticeNavigatorObserver()],
           debugShowCheckedModeBanner: false,
           theme: _themeData(Brightness.light),
@@ -359,7 +361,7 @@ class _ViewerPageState extends State<ViewerPage>
       if (!mounted) return;
       setState(() {
         _engine = engine;
-        _status = 'Engine ready (PdfCraft Rust core)';
+        _status = 'Engine ready (Overline Rust core)';
       });
       unawaited(_offerRecovery(engine));
       _setupNativeChannels();
@@ -1275,7 +1277,7 @@ class _ViewerPageState extends State<ViewerPage>
             ),
           ],
           subject: fileName,
-          text: 'Shared from PdfCraft Mobile',
+          text: 'Shared from Overline',
         ),
       );
       if (mounted) setState(() => _status = 'Share sheet opened');
@@ -1405,6 +1407,19 @@ class _ViewerPageState extends State<ViewerPage>
     }
   }
 
+  void _showAboutAndLicenses(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: 'Overline',
+      applicationVersion: '1.0.0',
+      applicationIcon: Image.asset('assets/icon/app_logo.png', width: 48, height: 48),
+      applicationLegalese: '© 2026 Overline Contributors.\n\n'
+          'Engine powered by PdfCraft (MIT / Apache-2.0, © ArtCraft Team and contributors).\n'
+          'Bundles Hayro (Apache-2.0 / MIT), Foxit Type 1 fonts (BSD-3-Clause), '
+          'Adobe CMap (BSD-3-Clause), and SIL OFL typefaces.',
+    );
+  }
+
   Future<void> _offerRecovery(PdfEngineApi engine) async {
     try {
       final directory = await _recoveryDirectory();
@@ -1429,7 +1444,7 @@ class _ViewerPageState extends State<ViewerPage>
         builder: (context) => AlertDialog(
           title: const Text('Unsaved work found'),
           content: Text(
-            'PdfCraft recovered an automatic copy of $originalName. Restore it now?',
+            'Overline recovered an automatic copy of $originalName. Restore it now?',
           ),
           actions: [
             TextButton(
@@ -3171,9 +3186,17 @@ class _ViewerPageState extends State<ViewerPage>
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => const AgentCommandSheet(),
+      builder: (context) => AgentCommandSheet(
+        engine: _engine,
+        documentHandle: _doc,
+        documentName: _name,
+        pageCount: _pageCount,
+        currentPage: _page,
+        onOperationCommitted: _onOperationStatus,
+      ),
     );
     if (!mounted || request == null) return;
+    if (request == 'agent_executed') return;
     if (request.startsWith('insights:')) {
       final query = request.substring('insights:'.length);
       await _openInsights(initialQuestion: query == 'summary' ? null : query);
@@ -3352,7 +3375,7 @@ class _ViewerPageState extends State<ViewerPage>
                                     icon: const Icon(Icons.arrow_back),
                                   ),
                             title: Text(
-                              _name ?? 'PdfCraft Mobile',
+                              _name ?? 'Overline',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -3462,6 +3485,8 @@ class _ViewerPageState extends State<ViewerPage>
                                         _open();
                                       case 'diagnostics':
                                         DiagnosticsSheet.show(context);
+                                      case 'about':
+                                        _showAboutAndLicenses(context);
                                     }
                                   },
                                   itemBuilder: (_) => [
@@ -3500,6 +3525,16 @@ class _ViewerPageState extends State<ViewerPage>
                                           Icon(Icons.troubleshoot, size: 20),
                                           SizedBox(width: 8),
                                           Text('Diagnostics & Logs'),
+                                        ],
+                                      ),
+                                    ),
+                                    const PopupMenuItem(
+                                      value: 'about',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.info_outline, size: 20),
+                                          SizedBox(width: 8),
+                                          Text('About & Licenses'),
                                         ],
                                       ),
                                     ),
@@ -4499,6 +4534,11 @@ class _ViewerPageState extends State<ViewerPage>
                   ),
                 ),
                 const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.info_outline, size: 20),
+                  tooltip: 'About & Open Source Licenses',
+                  onPressed: () => _showAboutAndLicenses(context),
+                ),
                 IconButton(
                   icon: const Icon(Icons.troubleshoot, size: 20),
                   tooltip: 'Diagnostics & Logs',

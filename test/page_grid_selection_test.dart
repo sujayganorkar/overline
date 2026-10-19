@@ -4,9 +4,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/bridge/api.dart' as bridge;
-import 'package:pdfcraft_mobile/services/pdf_engine.dart';
-import 'package:pdfcraft_mobile/widgets/page_grid.dart';
+import 'package:overline/bridge/api.dart' as bridge;
+import 'package:overline/services/pdf_engine.dart';
+import 'package:overline/widgets/page_grid.dart';
 
 void main() {
   testWidgets(

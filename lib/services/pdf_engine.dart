@@ -128,10 +128,10 @@ Future<PdfEngineApi> createPdfCraftEngine() async {
   // prebuilt native libraries for ABIs without a PdfCraft build.
   if (!Platform.isAndroid) {
     throw UnsupportedError(
-      'PdfCraft Mobile currently supports Android only; iOS packaging is a later milestone.',
+      'Overline currently supports Android only; iOS packaging is a later milestone.',
     );
   }
-  const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  const channel = MethodChannel('app.overline.pdf/paths');
   final workspace = await channel.invokeMethod<String>('getSupportDir');
   if (workspace == null || workspace.isEmpty) {
     throw StateError('Could not locate the app support directory');

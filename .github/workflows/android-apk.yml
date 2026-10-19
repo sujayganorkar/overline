@@ -70,13 +70,13 @@ jobs:
       - name: Name artifacts by source commit
         id: artifacts
         run: |
-          APK="dist/apk/PdfCraft-Mobile-${GITHUB_SHA:0:12}.apk"
-          cp dist/apk/PdfCraft-Mobile-latest.apk "$APK"
+          APK="dist/apk/Overline-${GITHUB_SHA:0:12}.apk"
+          cp dist/apk/Overline-latest.apk "$APK"
           sha256sum "$APK" > "$APK.sha256"
           echo "apk_path=$APK" >> "$GITHUB_OUTPUT"
 
-          AAB="dist/bundle/PdfCraft-Mobile-${GITHUB_SHA:0:12}.aab"
-          cp dist/bundle/PdfCraft-Mobile-release.aab "$AAB"
+          AAB="dist/bundle/Overline-${GITHUB_SHA:0:12}.aab"
+          cp dist/bundle/Overline-release.aab "$AAB"
           sha256sum "$AAB" > "$AAB.sha256"
           echo "aab_path=$AAB" >> "$GITHUB_OUTPUT"
 
@@ -88,7 +88,7 @@ jobs:
       - name: Upload downloadable APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-Mobile-APK-${{ github.sha }}
+          name: Overline-APK-${{ github.sha }}
           path: |
             ${{ steps.artifacts.outputs.apk_path }}
             ${{ steps.artifacts.outputs.apk_path }}.sha256
@@ -98,7 +98,7 @@ jobs:
       - name: Upload Google Play App Bundle (.aab)
         uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-Mobile-Bundle-${{ github.sha }}
+          name: Overline-Bundle-${{ github.sha }}
           path: |
             ${{ steps.artifacts.outputs.aab_path }}
             ${{ steps.artifacts.outputs.aab_path }}.sha256
@@ -108,7 +108,7 @@ jobs:
       - name: Upload ProGuard mapping and native debug symbols
         uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-Mobile-Symbols-${{ github.sha }}
+          name: Overline-Symbols-${{ github.sha }}
           path: |
             dist/bundle/mapping.txt
             dist/bundle/native-debug-symbols.zip

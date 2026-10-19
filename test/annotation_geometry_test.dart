@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/annotate_page.dart'
+import 'package:overline/widgets/annotate_page.dart'
     show selectionQuads, TextLineBox;
-import 'package:pdfcraft_mobile/widgets/annotation_geometry.dart' as geo;
+import 'package:overline/widgets/annotation_geometry.dart' as geo;
 
 void main() {
   test('image pixels convert to top-left PDF points at the render dpi', () {

@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/bridge/api.dart' as bridge;
-import 'package:pdfcraft_mobile/main.dart';
-import 'package:pdfcraft_mobile/services/pdf_engine.dart';
+import 'package:overline/bridge/api.dart' as bridge;
+import 'package:overline/main.dart';
+import 'package:overline/services/pdf_engine.dart';
 
 class FakePdfEngine implements PdfEngineApi {
   @override
@@ -89,7 +89,7 @@ void main() {
 
     expect(find.text('What would you like to do?'), findsOneWidget);
     expect(find.text('Open a PDF'), findsOneWidget);
-    expect(find.text('PdfCraft Mobile'), findsOneWidget);
+    expect(find.text('Overline'), findsOneWidget);
   });
 
   testWidgets('viewer shows an engine initialization error', (tester) async {

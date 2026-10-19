@@ -1,2 +1,1 @@
-PdfCraft: Edit & Sign PDF
-
+Overline: Fast PDF Editor & Signer

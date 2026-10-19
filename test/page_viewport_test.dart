@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/page_viewport.dart';
+import 'package:overline/widgets/page_viewport.dart';
 
 void main() {
   group('fitPageScale', () {

@@ -1,4 +1,4 @@
-package com.pdfcraft.pdfcraft_mobile
+package app.overline.pdf
 
 import android.content.Intent
 import android.net.Uri
@@ -25,7 +25,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getSupportDir" -> {
-                    val dir = File(filesDir, "pdfcraft-workspace")
+                    val dir = File(filesDir, "overline-workspace")
                     if (!dir.exists() && !dir.mkdirs()) {
                         result.error("IO_ERROR", "Could not create ${dir.absolutePath}", null)
                     } else {
@@ -119,6 +119,6 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
-        private const val CHANNEL = "com.pdfcraft.pdfcraft_mobile/paths"
+        private const val CHANNEL = "app.overline.pdf/paths"
     }
 }

@@ -280,7 +280,7 @@ const pdfTasks = <PdfTask>[
   ),
   PdfTask(
     'agent',
-    'Ask PdfCraft',
+    'Ask Overline',
     'Describe a supported document task',
     'Read',
     Icons.auto_awesome_outlined,

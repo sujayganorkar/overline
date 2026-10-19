@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/bridge/api.dart' as bridge;
-import 'package:pdfcraft_mobile/main.dart';
-import 'package:pdfcraft_mobile/widgets/reader_controls.dart';
+import 'package:overline/bridge/api.dart' as bridge;
+import 'package:overline/main.dart';
+import 'package:overline/widgets/reader_controls.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'viewer_initialization_test.dart' show FakePdfEngine;

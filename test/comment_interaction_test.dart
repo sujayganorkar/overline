@@ -4,10 +4,10 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/bridge/api.dart' as bridge;
-import 'package:pdfcraft_mobile/widgets/comment_composer.dart';
-import 'package:pdfcraft_mobile/widgets/annotate_page.dart';
-import 'package:pdfcraft_mobile/widgets/comments_screen.dart';
+import 'package:overline/bridge/api.dart' as bridge;
+import 'package:overline/widgets/comment_composer.dart';
+import 'package:overline/widgets/annotate_page.dart';
+import 'package:overline/widgets/comments_screen.dart';
 
 import 'viewer_initialization_test.dart' show FakePdfEngine;
 

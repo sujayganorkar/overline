@@ -1,12 +1,12 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/services/app_diagnostics.dart';
-import 'package:pdfcraft_mobile/services/feature_flags.dart';
-import 'package:pdfcraft_mobile/services/page_cache.dart';
-import 'package:pdfcraft_mobile/services/review_prompt.dart';
-import 'package:pdfcraft_mobile/services/telemetry_sink.dart';
-import 'package:pdfcraft_mobile/widgets/diagnostics_sheet.dart';
+import 'package:overline/services/app_diagnostics.dart';
+import 'package:overline/services/feature_flags.dart';
+import 'package:overline/services/page_cache.dart';
+import 'package:overline/services/review_prompt.dart';
+import 'package:overline/services/telemetry_sink.dart';
+import 'package:overline/widgets/diagnostics_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MockTelemetrySink implements TelemetrySink {
@@ -111,6 +111,18 @@ void main() {
 
       AppDiagnostics.instance.notifyMemoryPressure();
       expect(cache.length, 0);
+
+      cache.dispose();
+    });
+
+    test('evicts oldest pages when byte limit is exceeded', () async {
+      final cache = BoundedPageCache(maxCapacity: 10, maxBytes: 100);
+      final bigBytes = Uint8List(60);
+
+      await cache.putIfAbsent(1, () async => bigBytes);
+      await cache.putIfAbsent(2, () async => bigBytes);
+      expect(cache.contains(1), isFalse);
+      expect(cache.contains(2), isTrue);
 
       cache.dispose();
     });

@@ -5,7 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/main.dart';
+import 'package:overline/main.dart';
 
 import 'viewer_initialization_test.dart' show FakePdfEngine;
 

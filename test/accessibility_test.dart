@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/widgets/find_bar.dart';
-import 'package:pdfcraft_mobile/widgets/zoom_controls.dart';
+import 'package:overline/widgets/find_bar.dart';
+import 'package:overline/widgets/zoom_controls.dart';
 
 void main() {
   group('ZoomControlsHud Accessibility & Touch Target Tests', () {

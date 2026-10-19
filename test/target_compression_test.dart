@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pdfcraft_mobile/bridge/api.dart' as bridge;
-import 'package:pdfcraft_mobile/services/target_compression.dart';
+import 'package:overline/bridge/api.dart' as bridge;
+import 'package:overline/services/target_compression.dart';
 
 import 'viewer_initialization_test.dart' show FakePdfEngine;
 
