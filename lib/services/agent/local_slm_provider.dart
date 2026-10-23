@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
-import 'package:flutter/foundation.dart';
 import '../app_diagnostics.dart';
 import 'agent_provider.dart';
 import 'slm_model_store.dart';

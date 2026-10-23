@@ -99,4 +99,13 @@ class SignatureStore {
       // Remembering is a convenience; signing must work regardless.
     }
   }
+
+  Future<void> clearSignatures() async {
+    try {
+      final dir = await _signaturesDir();
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (_) {}
+  }
 }

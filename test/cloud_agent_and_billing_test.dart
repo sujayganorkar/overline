@@ -70,16 +70,10 @@ void main() {
 
   group('PaywallSheet Widget', () {
     testWidgets('renders Overline Pro features and buttons', (tester) async {
-      var monthlyTapped = false;
-      var restoreTapped = false;
-
       await tester.pumpWidget(
-        MaterialApp(
+        const MaterialApp(
           home: Scaffold(
-            body: PaywallSheet(
-              onSubscribeMonthly: () => monthlyTapped = true,
-              onRestorePurchases: () => restoreTapped = true,
-            ),
+            body: PaywallSheet(),
           ),
         ),
       );
@@ -89,10 +83,34 @@ void main() {
       expect(find.text('Gemini 1.5 Pro & Claude Intelligence'), findsOneWidget);
       expect(find.text('Start 7-Day Free Trial'), findsOneWidget);
       expect(find.text('Restore Purchases'), findsOneWidget);
+    });
 
+    testWidgets('triggers onSubscribeMonthly', (tester) async {
+      var monthlyTapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PaywallSheet(
+              onSubscribeMonthly: () => monthlyTapped = true,
+            ),
+          ),
+        ),
+      );
       await tester.tap(find.text('Start 7-Day Free Trial'));
       expect(monthlyTapped, isTrue);
+    });
 
+    testWidgets('triggers onRestorePurchases', (tester) async {
+      var restoreTapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PaywallSheet(
+              onRestorePurchases: () => restoreTapped = true,
+            ),
+          ),
+        ),
+      );
       await tester.tap(find.text('Restore Purchases'));
       expect(restoreTapped, isTrue);
     });

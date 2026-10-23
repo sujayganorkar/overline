@@ -12,8 +12,8 @@ class BillingService extends ChangeNotifier {
   BillingService({
     required this.backendUrl,
     required this.getAuthToken,
-    bool isSubscriber = false,
-  }) : _isSubscriber = isSubscriber;
+    this._isSubscriber = false,
+  });
 
   final String backendUrl;
   final Future<String?> Function() getAuthToken;

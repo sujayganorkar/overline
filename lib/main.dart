@@ -49,6 +49,7 @@ import 'widgets/signature_sheet.dart';
 import 'widgets/text_edit_sheet.dart';
 import 'widgets/output_saver.dart';
 import 'widgets/reader_controls.dart';
+import 'widgets/settings_sheet.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -273,6 +274,7 @@ class _ViewerPageState extends State<ViewerPage>
   Offset? _viewerSwipeStart;
   bool _viewerLongPressSelecting = false;
   Timer? _recoveryDebounce;
+  Timer? _updateCheckTimer;
   Future<void> _recoveryWrites = Future<void>.value();
 
   // Unified Canvas & UX state
@@ -372,7 +374,7 @@ class _ViewerPageState extends State<ViewerPage>
         _status = 'Engine ready (Overline Rust core)';
       });
       unawaited(_offerRecovery(engine));
-      unawaited(_checkForAppUpdates());
+      _scheduleUpdateCheck();
       _setupNativeChannels();
       if (widget.initialDocumentBytes != null) {
         await _openDocumentBytes(
@@ -1303,6 +1305,7 @@ class _ViewerPageState extends State<ViewerPage>
     bridge.SaveSnapshot? snapshot;
     var externalSaved = false;
     _recoveryDebounce?.cancel();
+    _updateCheckTimer?.cancel();
     await _recoveryWrites;
     setState(() => _busy = true);
     try {
@@ -1389,6 +1392,7 @@ class _ViewerPageState extends State<ViewerPage>
     });
     try {
       _recoveryDebounce?.cancel();
+    _updateCheckTimer?.cancel();
       await _recoveryWrites;
       snapshot = await engine.saveSnapshot(handle: doc);
       final baseName = currentName.replaceAll(RegExp(r'[/\\]'), '_');
@@ -1435,6 +1439,7 @@ class _ViewerPageState extends State<ViewerPage>
     });
     try {
       _recoveryDebounce?.cancel();
+    _updateCheckTimer?.cancel();
       await _recoveryWrites;
       snapshot = await engine.saveSnapshot(handle: doc);
       final baseName = currentName.replaceAll(RegExp(r'[/\\]'), '_');
@@ -1492,6 +1497,7 @@ class _ViewerPageState extends State<ViewerPage>
   void _scheduleRecoveryCheckpoint() {
     if (!_dirty || _doc == null) return;
     _recoveryDebounce?.cancel();
+    _updateCheckTimer?.cancel();
     _recoveryDebounce = Timer(
       const Duration(milliseconds: 700),
       () => unawaited(_queueRecoveryCheckpoint()),
@@ -1553,24 +1559,26 @@ class _ViewerPageState extends State<ViewerPage>
     );
   }
 
-  Future<void> _checkForAppUpdates() async {
-    await Future.delayed(const Duration(seconds: 3));
-    if (!mounted) return;
-    final update = await UpdateCheckerService.instance.checkForUpdate();
-    if (update != null && mounted) {
-      AppNotice.show(
-        context,
-        AppNotice(
-          message: 'Overline v${update.latestVersion} is available!',
-          kind: NoticeKind.info,
-          duration: const Duration(seconds: 8),
-          action: NoticeAction(
-            label: 'Download',
-            onPressed: () => UpdateCheckerService.launchUrl(update.releaseUrl),
+  void _scheduleUpdateCheck() {
+    _updateCheckTimer?.cancel();
+    _updateCheckTimer = Timer(const Duration(seconds: 3), () async {
+      if (!mounted) return;
+      final update = await UpdateCheckerService.instance.checkForUpdate();
+      if (update != null && mounted) {
+        AppNotice.show(
+          context,
+          AppNotice(
+            message: 'Overline v${update.latestVersion} is available!',
+            kind: NoticeKind.info,
+            duration: const Duration(seconds: 8),
+            action: NoticeAction(
+              label: 'Download',
+              onPressed: () => UpdateCheckerService.launchUrl(update.releaseUrl),
+            ),
           ),
-        ),
-      );
-    }
+        );
+      }
+    });
   }
 
   Future<void> _offerRecovery(PdfEngineApi engine) async {
@@ -1656,6 +1664,7 @@ class _ViewerPageState extends State<ViewerPage>
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _recoveryDebounce?.cancel();
+    _updateCheckTimer?.cancel();
       unawaited(_queueRecoveryCheckpoint());
     }
   }
@@ -3448,6 +3457,7 @@ class _ViewerPageState extends State<ViewerPage>
     _viewerTransform.dispose();
     _continuousScroll.dispose();
     _recoveryDebounce?.cancel();
+    _updateCheckTimer?.cancel();
     _verticalPageImages.dispose();
     _horizontalPageImages.dispose();
     final engine = _engine;
@@ -3546,38 +3556,17 @@ class _ViewerPageState extends State<ViewerPage>
                               overflow: TextOverflow.ellipsis,
                             ),
                             actions: [
-                              PopupMenuButton<PdfCraftThemeChoice>(
-                                tooltip: 'Color theme',
-                                icon: Icon(
-                                  PdfCraftThemeScope.maybeOf(context)
-                                          ?.notifier
-                                          ?.choice
-                                          .icon ??
-                                      Icons.brightness_auto,
-                                ),
-                                onSelected: (choice) {
-                                  unawaited(
-                                    PdfCraftThemeScope.maybeOf(context)
-                                            ?.notifier
-                                            ?.setChoice(choice) ??
-                                        Future<void>.value(),
+                              IconButton(
+                                icon: const Icon(Icons.settings_outlined),
+                                tooltip: 'Settings',
+                                onPressed: () {
+                                  SettingsSheet.show(
+                                    context,
+                                    onRecentsCleared: _loadRecents,
+                                    onShowLicenses: () =>
+                                        _showAboutAndLicenses(context),
                                   );
                                 },
-                                itemBuilder: (_) => PdfCraftThemeChoice.values
-                                    .map(
-                                      (choice) =>
-                                          PopupMenuItem<PdfCraftThemeChoice>(
-                                            value: choice,
-                                            child: Row(
-                                              children: [
-                                                Icon(choice.icon),
-                                                const SizedBox(width: 8),
-                                                Text(choice.label),
-                                              ],
-                                            ),
-                                          ),
-                                    )
-                                    .toList(),
                               ),
                               if (_doc != null) ...[
                                 Padding(
