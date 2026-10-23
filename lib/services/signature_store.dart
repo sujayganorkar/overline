@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 /// the device; a missing or unreadable store simply means "no saved
 /// signature yet" and never blocks the signing flow.
 class SignatureStore {
-  static const _channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  static const _channel = MethodChannel('app.overline.pdf/paths');
 
   Future<Directory> _signaturesDir() async {
     final supportPath = await _channel.invokeMethod<String>('getSupportDir');

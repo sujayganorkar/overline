@@ -37,6 +37,20 @@ class MainActivity : FlutterActivity() {
                     pendingPdfMap = null
                     result.success(pdf)
                 }
+                "openUrl" -> {
+                    val url = call.argument<String>("url")
+                    if (url != null) {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("LAUNCH_FAILED", e.message, null)
+                        }
+                    } else {
+                        result.error("INVALID_URL", "URL is null", null)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }

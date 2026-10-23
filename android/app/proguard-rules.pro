@@ -10,6 +10,7 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+-keep class app.overline.pdf.** { *; }
 -keep class com.pdfcraft.pdfcraft_mobile.** { *; }
 
 # Preserve Line Numbers and Source Attributes for Crash Telemetry Symbolication

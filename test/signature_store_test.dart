@@ -6,7 +6,7 @@ import 'package:overline/services/signature_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  const channel = MethodChannel('app.overline.pdf/paths');
   late Directory dir;
 
   Future<void> mockChannel() async {

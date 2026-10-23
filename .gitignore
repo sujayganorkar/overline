@@ -42,3 +42,6 @@ android/app/src/main/jniLibs/
 !android/app/src/main/res/**/*.png
 !ios/Runner/Assets.xcassets/**/*.png
 !assets/**
+
+# Private backend (hosted in separate private repository)
+overline-backend/

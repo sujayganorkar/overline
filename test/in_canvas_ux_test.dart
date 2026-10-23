@@ -77,7 +77,7 @@ class SelectableEngine extends TestDocEngine {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  const channel = MethodChannel('app.overline.pdf/paths');
   late Directory tempDir;
 
   setUp(() async {

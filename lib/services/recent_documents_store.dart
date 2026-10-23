@@ -47,7 +47,7 @@ class RecentDocumentEntry {
 /// Keeps the last 5 accessed documents so users can resume work from the
 /// empty home screen without having to navigate system file pickers repeatedly.
 class RecentDocumentsStore {
-  static const _channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  static const _channel = MethodChannel('app.overline.pdf/paths');
   static const int _maxRecents = 5;
 
   Future<Directory?> _recentsDir() async {

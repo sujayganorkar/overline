@@ -13,7 +13,7 @@ import 'in_canvas_ux_test.dart' show TestDocEngine;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory directory;
-  const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+  const channel = MethodChannel('app.overline.pdf/paths');
   setUp(() async {
     directory = await Directory.systemTemp.createTemp('text-audit-');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

@@ -43,6 +43,7 @@ import 'services/page_cache.dart';
 import 'services/feature_flags.dart';
 import 'services/telemetry_sink.dart';
 import 'services/review_prompt.dart';
+import 'services/update_checker.dart';
 import 'widgets/diagnostics_sheet.dart';
 import 'widgets/signature_sheet.dart';
 import 'widgets/text_edit_sheet.dart';
@@ -371,6 +372,7 @@ class _ViewerPageState extends State<ViewerPage>
         _status = 'Engine ready (Overline Rust core)';
       });
       unawaited(_offerRecovery(engine));
+      unawaited(_checkForAppUpdates());
       _setupNativeChannels();
       if (widget.initialDocumentBytes != null) {
         await _openDocumentBytes(
@@ -385,7 +387,7 @@ class _ViewerPageState extends State<ViewerPage>
   }
 
   void _setupNativeChannels() {
-    const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+    const channel = MethodChannel('app.overline.pdf/paths');
     channel.setMethodCallHandler((call) async {
       if (call.method == 'onPdfReceived') {
         final args = call.arguments;
@@ -1460,7 +1462,7 @@ class _ViewerPageState extends State<ViewerPage>
   }
 
   Future<Directory> _recoveryDirectory() async {
-    const channel = MethodChannel('com.pdfcraft.pdfcraft_mobile/paths');
+    const channel = MethodChannel('app.overline.pdf/paths');
     final supportPath = await channel.invokeMethod<String>('getSupportDir');
     if (supportPath == null || supportPath.isEmpty) {
       throw StateError('Could not locate app storage for recovery');
@@ -1549,6 +1551,26 @@ class _ViewerPageState extends State<ViewerPage>
           'Bundles Hayro (Apache-2.0 / MIT), Foxit Type 1 fonts (BSD-3-Clause), '
           'Adobe CMap (BSD-3-Clause), and SIL OFL typefaces.',
     );
+  }
+
+  Future<void> _checkForAppUpdates() async {
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+    final update = await UpdateCheckerService.instance.checkForUpdate();
+    if (update != null && mounted) {
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Overline v${update.latestVersion} is available!',
+          kind: NoticeKind.info,
+          duration: const Duration(seconds: 8),
+          action: NoticeAction(
+            label: 'Download',
+            onPressed: () => UpdateCheckerService.launchUrl(update.releaseUrl),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _offerRecovery(PdfEngineApi engine) async {
