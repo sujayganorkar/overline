@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sujayganorkar/pdfcraft-mobile/releases/latest">
+  <a href="https://github.com/sujayganorkar/overline/releases/latest">
     <img src="https://img.shields.io/github/v/release/sujayganorkar/pdfcraft-mobile?label=Release&color=blue" alt="Latest Release">
   </a>
   <img src="https://img.shields.io/badge/Platform-Android%2064--bit-green" alt="Platform">
@@ -41,7 +41,7 @@ Unlike web converters and bloated subscription PDF readers that upload your sens
 ## 📲 Download & Installation
 
 ### Option 1: Direct APK Download
-Download the latest pre-compiled APK directly from the [GitHub Releases](https://github.com/sujayganorkar/pdfcraft-mobile/releases/latest) page:
+Download the latest pre-compiled APK directly from the [GitHub Releases](https://github.com/sujayganorkar/overline/releases/latest) page:
 
 1. Download **`Overline-latest.apk`**.
 2. Tap the downloaded file and choose **Install** (allow *Install unknown apps* if prompted).
@@ -52,7 +52,7 @@ Download the latest pre-compiled APK directly from the [GitHub Releases](https:/
 
 ### Option 2: Automatic Updates via Obtainium (Recommended)
 If you use [Obtainium](https://github.com/ImranR98/Obtainium):
-1. Copy this repository URL: `https://github.com/sujayganorkar/pdfcraft-mobile`.
+1. Copy this repository URL: `https://github.com/sujayganorkar/overline`.
 2. Open Obtainium, tap **Add App**, and paste the URL.
 3. Obtainium will track releases and update Overline seamlessly in the background.
 
@@ -78,8 +78,8 @@ Overline uses a high-performance hybrid architecture:
 
 ```bash
 # 1. Clone the repository with submodules
-git clone --recurse-submodules https://github.com/sujayganorkar/pdfcraft-mobile.git
-cd pdfcraft-mobile
+git clone --recurse-submodules https://github.com/sujayganorkar/overline.git
+cd overline
 
 # 2. Source the environment paths
 source tools/env.sh
