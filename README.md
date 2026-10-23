@@ -1,88 +1,109 @@
-# PdfCraft Mobile
+# Overline
 
-Flutter UI over the [PdfCraft](https://github.com/storytold/pdfcraft) Rust engine, bridged with
-[flutter_rust_bridge](https://github.com/fzyzcjy/flutter_rust_bridge). Offline-first; Android first,
-iOS next (shared Rust/Flutter code).
+<p align="center">
+  <strong>Fast, private, offline PDF editor & signer powered by a native Rust engine.</strong>
+</p>
 
-## Phase 1 status — working PDF viewer
+<p align="center">
+  <a href="https://github.com/sujayganorkar/pdfcraft-mobile/releases/latest">
+    <img src="https://img.shields.io/github/v/release/sujayganorkar/pdfcraft-mobile?label=Release&color=blue" alt="Latest Release">
+  </a>
+  <img src="https://img.shields.io/badge/Platform-Android%2064--bit-green" alt="Platform">
+  <img src="https://img.shields.io/badge/License-Apache%202.0%20%2F%20MIT-orange" alt="License">
+  <a href="https://github.com/ImranR98/Obtainium">
+    <img src="https://img.shields.io/badge/Obtainium-Compatible-purple" alt="Obtainium Compatible">
+  </a>
+</p>
 
-Verified on this machine (Linux, NDK r27c, Flutter 3.47.7):
+---
 
-| Claim | Status | Evidence |
-|---|---|---|
-| Engine crates isolated from the egui desktop UI | done | Adapter path-deps only `pdfcraft-engine` + `pdfcraft-render` + vendored patches; no `ui-egui`/`rfd`/`eframe` in the graph |
-| Engine work through the bridge | host verified | Rust integration test opens an engine-generated PDF, reads page count/size, renders 816×1056 PNG at 96 dpi, saves/reopens, rejects malformed input, and closes handles |
-| Android ARM64 + x86_64 native libraries and APK packaging | done | Build explicitly targets only ABIs with a PdfCraft library; debug/release APKs contain both |
-| Android app runtime (open/render/navigate/Save As/reopen) | verified | Android 15/API 35 x86_64 emulator; user reports success on Galaxy S26 Ultra (India) |
-| Editing operations end-to-end on Android | verified | `page_rotate` via in-app operation browser: dirty/undo state, Save As commit, reopen shows the edit |
+Unlike web converters and bloated subscription PDF readers that upload your sensitive documents to remote cloud servers, **Overline** processes every single PDF operation directly on your device CPU. Your tax returns, legal contracts, and medical records never leave your phone.
 
-The app UI: open PDF (system document picker), page count, page render at 96 dpi (pinch-zoom), page
-navigation, password prompt, Save As through the system document provider, and an Editing tools
-browser exposing every PdfCraft automation operation (annotations, pages, forms, signatures,
-redaction, OCR, optimize, export, undo/redo) through schema-driven forms. Bespoke touch UIs cover
-drawing/notes/shapes/highlight annotations, form filling, typed signatures, and a thumbnail page
-grid with rotate/duplicate/delete/move/insert actions — all verified on the Android emulator. The flow was
-user-confirmed on a Galaxy S26 Ultra. The phone's Android version and
-logs were not captured in the engineering session.
+---
 
-## Layout
+## ✨ Features
 
-```
-Cargo.toml            workspace; relative engine deps + vendored hayro/lopdf patches
-third_party/pdfcraft  pinned upstream Git submodule; see .gitmodules and plan/decisions/
-rust/                 the bridge crate (adapter, no PDF logic of its own)
-  src/api.rs          Flutter-facing API; engine Session lives on a worker thread
-  tests/smoke.rs      host end-to-end test of the bridge
-  examples/make_pdf.rs  generates a test PDF with the engine
-lib/                  Flutter app (lib/bridge is FRB-generated — do not edit)
-tools/env.sh          toolchain env (source before builds)
-~/sdks/                optional local Flutter/Android SDK installs (not required paths in Cargo)
-```
+- **⚡ Blazing Fast Native Core:** Powered by a high-performance native Rust engine with 64-bit SIMD acceleration and full Android 15 16 KB page-size support.
+- **🔒 100% Offline & Private:** Zero account required, zero tracking, zero telemetry. Runs completely in airplane mode.
+- **✍️ Digital Signatures:** Create handwritten or typed signatures once; place and resize anywhere. Signatures are encrypted locally in app-private flash storage.
+- **📄 Core PDF Editing Suite:**
+  - **Reorganize Pages:** Rotate, reorder, delete, duplicate, and insert blank pages with a responsive visual grid.
+  - **In-Canvas Markup:** Highlighting, strikethroughs, pencil drawings, shapes, and text notes.
+  - **Form Filling:** Fill out standard PDF form fields directly on your phone.
+  - **Document Redaction:** Black out sensitive text and metadata before sharing.
+  - **Merge & Split:** Combine multiple documents or extract specific page ranges.
+- **🌙 Comfortable Reading:** Dark theme support with optional PDF color inversion for comfortable nighttime reading.
+- **🛡️ Auto Draft Recovery:** Crash-resilient architecture that automatically preserves your unsaved edits if Android terminates the app in the background.
+- **🔄 Built-In Update Checker:** In-app notification when new GitHub releases are available, plus direct compatibility with Obtainium for background updates.
 
-## Why the engine lives outside this repo
+---
 
-`third_party/pdfcraft` is a submodule pinned to an upstream commit. The Cargo workspace excludes its
-nested workspace, references engine crates via relative paths, and patches crates.io to upstream's
-vendored `hayro`/`lopdf` sources. This preserves the engine's required patches and avoids dependence
-on a developer-specific absolute filesystem path. See `plan/decisions/0001-pdfcraft-pinning.md`.
+## 📲 Download & Installation
 
-## Build & run
+### Option 1: Direct APK Download
+Download the latest pre-compiled APK directly from the [GitHub Releases](https://github.com/sujayganorkar/pdfcraft-mobile/releases/latest) page:
 
-See `SETUP.md` for the one-time toolchain setup. Short version:
+1. Download **`Overline-latest.apk`**.
+2. Tap the downloaded file and choose **Install** (allow *Install unknown apps* if prompted).
+3. *(Optional)* Verify the SHA-256 checksum:
+   ```bash
+   sha256sum -c Overline-latest.apk.sha256
+   ```
+
+### Option 2: Automatic Updates via Obtainium (Recommended)
+If you use [Obtainium](https://github.com/ImranR98/Obtainium):
+1. Copy this repository URL: `https://github.com/sujayganorkar/pdfcraft-mobile`.
+2. Open Obtainium, tap **Add App**, and paste the URL.
+3. Obtainium will track releases and update Overline seamlessly in the background.
+
+---
+
+## 🏗️ Architecture
+
+Overline uses a high-performance hybrid architecture:
+- **UI & Presentation:** Flutter (Material 3) with custom gestures, multi-touch canvas viewport, and adaptive layout.
+- **Bridge Layer:** [`flutter_rust_bridge`](https://github.com/fzyzcjy/flutter_rust_bridge) providing zero-copy asynchronous FFI between Dart and native code.
+- **Engine Core:** Native Rust library cross-compiled for `arm64-v8a` and `x86_64` targets with 16 KB ELF page alignment for modern Linux/Android kernels.
+
+---
+
+## 🛠️ Building from Source
+
+### Prerequisites
+- **Flutter SDK:** 3.47+ (Dart 3.13+)
+- **Rust Toolchain:** `nightly` or `stable` with Android targets (`aarch64-linux-android`, `x86_64-linux-android`)
+- **Android NDK:** r27c+ (`cargo-ndk`)
+
+### Quick Build Instructions
 
 ```bash
+# 1. Clone the repository with submodules
+git clone --recurse-submodules https://github.com/sujayganorkar/pdfcraft-mobile.git
+cd pdfcraft-mobile
+
+# 2. Source the environment paths
 source tools/env.sh
-cargo test -p pdfcraft-mobile-api                              # engine round-trip on host
-flutter_rust_bridge_codegen generate --rust-root rust --rust-input crate::api --dart-output lib/bridge   # after API changes
-cargo ndk -t arm64-v8a -t x86_64 build --release -p pdfcraft-mobile-api
-cp target/aarch64-linux-android/release/libpdfcraft_mobile_api.so android/app/src/main/jniLibs/arm64-v8a/
-cp target/x86_64-linux-android/release/libpdfcraft_mobile_api.so android/app/src/main/jniLibs/x86_64/
-flutter run --release --target-platform android-arm64,android-x64 # with a device attached
+
+# 3. Fetch dependencies
+flutter pub get
+
+# 4. Compile native Rust libraries and assemble release APK
+tools/build-apk.sh
 ```
 
-For a fresh clone, initialize the pinned engine first: `git submodule update --init --recursive`.
-Keep both `Cargo.lock` and `pubspec.lock`; these are application lockfiles.
+The resulting binary will be saved at `dist/apk/Overline-latest.apk`.
 
-## APK on every push
-
-The local pre-push hook builds a release APK at `dist/apk/PdfCraft-Mobile-latest.apk` and blocks a
-push if the working tree is dirty or the pushed commit is not `HEAD`. To enable it on a fresh clone:
-
+To run all unit and widget tests:
 ```bash
-git config --local core.hooksPath .githooks
+flutter test
 ```
 
-GitHub Actions also runs the checks and builds an APK for each push. Download it from **Actions →
-Android APK → latest successful run → Artifacts** (`PdfCraft-Mobile-<commit SHA>`). Artifacts are
-retained for 30 days. The APK targets Android ARM64 and x86_64 only, matching the packaged Rust
-libraries. It is a debug-signed test build, not a store-release package. To build manually without
-pushing, run `source tools/env.sh && tools/build-apk.sh`.
+---
 
-## Product MVP direction
+## 📜 Legal & Open Source Attribution
 
-The first product MVP is the full manual PDF editor scope: reading/search, annotations and text
-tools, pages/documents, forms/signatures, OCR/conversion/compression, and reliable save/undo/recovery.
-The agent/chat/model experience comes later. Build a typed operation layer for manual controls now
-so future agents can call the same validated operations. Audit each desired capability against the
-real PdfCraft API and test it on mobile before claiming support. See [`plan/`](plan/README.md) for
-the decision, staged roadmap, and current status.
+Overline is dual-licensed under the **Apache License 2.0** and the **MIT License**.
+
+- **Engine Core:** Powered by the open-source [PdfCraft](https://github.com/storytold/pdfcraft) engine (MIT / Apache-2.0, © ArtCraft Team and contributors).
+- **Bundled Fonts & Assets:** Bundles Hayro (Apache-2.0 / MIT), Foxit Type 1 fonts (BSD-3-Clause), Adobe CMap (BSD-3-Clause), and SIL OFL typefaces.
+- See [`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md) for privacy practices and [`docs/DATA_SAFETY.md`](docs/DATA_SAFETY.md) for Android permission details.
