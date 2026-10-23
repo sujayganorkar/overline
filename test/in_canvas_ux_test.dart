@@ -14,6 +14,7 @@ import 'viewer_initialization_test.dart' show FakePdfEngine;
 class TestDocEngine extends FakePdfEngine {
   TestDocEngine({this.pages = 3});
   final int pages;
+  final renderedPages = <int>[];
 
   @override
   Future<int> pageCount({required int handle}) async => pages;
@@ -34,6 +35,7 @@ class TestDocEngine extends FakePdfEngine {
     required int page1Based,
     required int dpi,
   }) async {
+    renderedPages.add(page1Based);
     // 4x4 transparent PNG
     return base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAD0lEQVR4nGP4jwQYiOMAANuQL9FuRbCyAAAAAElFTkSuQmCC',
@@ -245,4 +247,220 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  Future<void> openReader(WidgetTester tester, TestDocEngine engine) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ViewerPage(
+          engineFactory: () async => engine,
+          initialDocumentBytes: Uint8List(100),
+          initialDocumentName: 'Gestures.pdf',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  for (final mode in ['Vertical scroll', 'Horizontal scroll']) {
+    testWidgets('zoom switches $mode from page scrolling to panning and back', (
+      tester,
+    ) async {
+      await openReader(tester, TestDocEngine());
+      await tester.tap(find.byTooltip('Reading view'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(mode));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zoom'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+            .panEnabled,
+        isFalse,
+      );
+      await tester.tap(find.byTooltip('Zoom in'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+            .panEnabled,
+        isTrue,
+      );
+      final list = find.descendant(
+        of: find.byType(InteractiveViewer),
+        matching: find.byType(ListView),
+      );
+      expect(
+        tester.widget<ListView>(list).physics,
+        isA<NeverScrollableScrollPhysics>(),
+      );
+      await tester.drag(find.byType(InteractiveViewer), const Offset(-50, -40));
+      await tester.pumpAndSettle();
+      expect(find.text('Page 1 of 3'), findsOneWidget);
+      await tester.tap(find.byTooltip('Reset zoom to fit page'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+            .panEnabled,
+        isFalse,
+      );
+      expect(
+        tester.widget<ListView>(list).physics,
+        isA<ClampingScrollPhysics>(),
+      );
+    });
+  }
+  testWidgets(
+    'facing pages require a deliberate horizontal swipe, not taps or vertical drags',
+    (tester) async {
+      final engine = TestDocEngine();
+      await openReader(tester, engine);
+      await tester.tap(find.byTooltip('Reading view'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Facing pages'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Page 1 of 3'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '3');
+      await tester.pump();
+      await tester.tap(find.text('Go to page 3'));
+      await tester.pumpAndSettle();
+      engine.renderedPages.clear();
+      await tester.tapAt(tester.getCenter(find.byType(InteractiveViewer)));
+      await tester.pumpAndSettle();
+      expect(engine.renderedPages, isEmpty);
+      await tester.drag(find.byType(InteractiveViewer), const Offset(0, -100));
+      await tester.pumpAndSettle();
+      expect(engine.renderedPages, isEmpty);
+      await tester.drag(find.byType(InteractiveViewer), const Offset(110, 0));
+      await tester.pumpAndSettle();
+      expect(engine.renderedPages, contains(1));
+    },
+  );
+  testWidgets(
+    'long-press handles retain finger-sized targets at maximum zoom',
+    (tester) async {
+      await openReader(tester, SelectableEngine());
+      await tester.longPressAt(
+        tester.getCenter(find.byType(InteractiveViewer)),
+      );
+      await tester.pumpAndSettle();
+      final viewer = tester.widget<InteractiveViewer>(
+        find.byType(InteractiveViewer),
+      );
+      viewer.transformationController!.value = Matrix4.identity()
+        ..scaleByDouble(8, 8, 1, 1);
+      await tester.pump();
+      final handle = find.byWidgetPredicate(
+        (w) =>
+            w is Semantics &&
+            w.properties.label == 'Start text selection handle, line 1',
+      );
+      final render = tester.renderObject<RenderBox>(handle);
+      final width =
+          (render.localToGlobal(Offset(render.size.width, 0)) -
+                  render.localToGlobal(Offset.zero))
+              .distance;
+      expect(width, closeTo(48, .1));
+    },
+  );
+  testWidgets('new zoom input interrupts a double-tap animation', (
+    tester,
+  ) async {
+    await openReader(tester, TestDocEngine());
+    await tester.tap(find.text('Zoom'));
+    await tester.pumpAndSettle();
+    final center = tester.getCenter(find.byType(InteractiveViewer));
+    await tester.tapAt(center);
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.tapAt(center);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 70));
+    final transform = tester
+        .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+        .transformationController!;
+    await tester.tap(find.byTooltip('Zoom out'));
+    await tester.pump();
+    final scale = transform.value.getMaxScaleOnAxis();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(transform.value.getMaxScaleOnAxis(), closeTo(scale, .001));
+  });
+  testWidgets(
+    'continuous long press offers selection on the actual touched page',
+    (tester) async {
+      await openReader(tester, SelectableEngine());
+      await tester.tap(find.byTooltip('Reading view'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Vertical scroll'));
+      await tester.pumpAndSettle();
+      await tester.longPressAt(
+        tester.getCenter(find.byType(InteractiveViewer)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Select text on page 1 in single-page view.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Select text'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextSelectionActions), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'facing-page long press selects the right-hand page, not the first page',
+    (tester) async {
+      final engine = SelectableEngine();
+      await openReader(tester, engine);
+      await tester.tap(find.byTooltip('Reading view'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Facing pages'));
+      await tester.pumpAndSettle();
+      final images = find.descendant(
+        of: find.byType(InteractiveViewer),
+        matching: find.byType(Image),
+      );
+      await tester.longPressAt(tester.getCenter(images.at(1)));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Select text on page 2 in single-page view.'),
+        findsOneWidget,
+      );
+      engine.renderedPages.clear();
+      await tester.tap(find.text('Select text'));
+      await tester.pumpAndSettle();
+      expect(engine.renderedPages, contains(2));
+      expect(find.byType(TextSelectionActions), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets('a pinch cannot finish as a long press after one finger lifts', (
+    tester,
+  ) async {
+    await openReader(tester, SelectableEngine());
+    final center = tester.getCenter(find.byType(InteractiveViewer));
+    final first = await tester.startGesture(
+      center - const Offset(30, 0),
+      pointer: 1,
+    );
+    final second = await tester.startGesture(
+      center + const Offset(30, 0),
+      pointer: 2,
+    );
+    await first.moveBy(const Offset(-20, 0));
+    await second.moveBy(const Offset(20, 0));
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.byType(TextSelectionActions), findsNothing);
+    await first.up();
+    await tester.pumpAndSettle();
+    await tester.longPressAt(tester.getCenter(find.byType(InteractiveViewer)));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextSelectionActions), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

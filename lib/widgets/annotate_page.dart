@@ -15,6 +15,7 @@ import '../services/pdf_engine.dart';
 import 'annotation_geometry.dart' as geo;
 import 'page_viewport.dart';
 import 'touch_session.dart';
+import 'text_edit_sheet.dart';
 
 enum AnnotateMode {
   pan,
@@ -589,42 +590,55 @@ class _AnnotatePageState extends State<AnnotatePage> {
   }
 
   Future<void> _placePageText(Offset at) async {
-    final controller = TextEditingController();
+    if (_saving) return;
+    setState(() => _saving = true);
     try {
-      final text = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Add text to page'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'Paragraph text',
-              hintText: 'Enter paragraph text to add',
+      final png = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: widget.page,
+        dpi: 96,
+      );
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TextEditSheet(
+            engine: widget.engine,
+            handle: widget.handle,
+            page: widget.page,
+            png: png,
+            imageWidthPx: widget.imageWidthPx * 96 / widget.dpi,
+            imageHeightPx: widget.imageHeightPx * 96 / widget.dpi,
+            initialAddAt: Offset(
+              geo.pxToPt(at.dx, widget.dpi),
+              geo.pxToPt(at.dy, widget.dpi),
             ),
+            onStatusChanged: (status) {
+              _lastStatus = status;
+              widget.onStatusChanged?.call(status);
+            },
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: const Text('Add'),
-            ),
-          ],
         ),
       );
-      if (text == null || text.trim().isEmpty || !mounted) return;
-      await _execute({
-        'page': widget.page,
-        'text': text.trim(),
-        'at': [geo.pxToPt(at.dx, widget.dpi), geo.pxToPt(at.dy, widget.dpi)],
-        'size': 12,
-      }, tool: 'page_add_text');
+      final updated = await widget.engine.renderPagePng(
+        handle: widget.handle,
+        page1Based: widget.page,
+        dpi: widget.dpi,
+      );
+      final image = await decodeImageFromList(updated);
+      if (mounted) {
+        setState(() => _baseImage = image);
+      } else {
+        image.dispose();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _error = 'Could not open or refresh the text editor. $e',
+        );
+      }
     } finally {
-      controller.dispose();
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -1519,8 +1533,8 @@ class _AnnotatePageState extends State<AnnotatePage> {
                             child: InteractiveViewer(
                               panEnabled:
                                   (_mode == AnnotateMode.pan ||
-                                          !_touch.canEdit) &&
-                                      !_saving,
+                                      !_touch.canEdit) &&
+                                  !_saving,
                               scaleEnabled: !_saving,
                               constrained: true,
                               minScale: 1,

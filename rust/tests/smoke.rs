@@ -369,3 +369,82 @@ async fn mobile_can_create_a_blank_pdf_without_opening_it() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn text_candidate_render_matches_single_commit_and_undo_restores_source() {
+    let workspace = tempfile::tempdir().unwrap();
+    let engine = Engine::new(workspace.path().to_string_lossy().into_owned());
+    let source = pdfcraft_engine::Session::new()
+        .create_from_text("text editing", "Original paragraph for touch editing")
+        .unwrap();
+    let doc = engine
+        .open("text.pdf".into(), source.to_vec(), None)
+        .await
+        .unwrap();
+    let before = engine.render_page_png(doc, 1, 96).await.unwrap();
+    let baseline = engine.save_snapshot(doc).await.unwrap();
+    engine.cancel_save(doc, baseline.token).await.unwrap();
+    let copy = engine
+        .open("preview.pdf".into(), baseline.bytes, None)
+        .await
+        .unwrap();
+    let args = r#"{"page":1,"paragraph":1,"text":"A reviewed replacement paragraph","width":250,"size":15}"#;
+    engine
+        .execute_tool(copy, "text_edit".into(), args.into())
+        .await
+        .unwrap();
+    let preview = engine.render_page_png(copy, 1, 96).await.unwrap();
+    if let Ok(directory) = std::env::var("TEXT_EDIT_PREVIEW_DIR") {
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(format!("{directory}/before.png"), &before).unwrap();
+        std::fs::write(format!("{directory}/preview.png"), &preview).unwrap();
+        let source_blocks = engine
+            .execute_tool(doc, "text_paragraphs".into(), r#"{"page":1}"#.into())
+            .await
+            .unwrap();
+        let preview_blocks = engine
+            .execute_tool(copy, "text_paragraphs".into(), r#"{"page":1}"#.into())
+            .await
+            .unwrap();
+        std::fs::write(
+            format!("{directory}/before.json"),
+            &source_blocks.contents[0].json,
+        )
+        .unwrap();
+        std::fs::write(
+            format!("{directory}/preview.json"),
+            &preview_blocks.contents[0].json,
+        )
+        .unwrap();
+    }
+    assert_ne!(preview, before);
+    assert_eq!(engine.render_page_png(doc, 1, 96).await.unwrap(), before);
+    assert!(
+        !engine.status(doc).await.unwrap().dirty,
+        "preview dirtied the source"
+    );
+    engine.close(copy, true).await.unwrap();
+    let committed = engine
+        .execute_tool(doc, "text_edit".into(), args.into())
+        .await
+        .unwrap();
+    assert!(committed.status.dirty);
+    assert_eq!(engine.render_page_png(doc, 1, 96).await.unwrap(), preview);
+    engine
+        .execute_tool(doc, "edit_undo".into(), "{}".into())
+        .await
+        .unwrap();
+    assert_eq!(engine.render_page_png(doc, 1, 96).await.unwrap(), before);
+    let snapshot = engine.save_snapshot(doc).await.unwrap();
+    engine.cancel_save(doc, snapshot.token).await.unwrap();
+    let reopened = engine
+        .open("reopened.pdf".into(), snapshot.bytes, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.render_page_png(reopened, 1, 96).await.unwrap(),
+        before
+    );
+    engine.close(reopened, true).await.unwrap();
+    engine.close(doc, true).await.unwrap();
+}

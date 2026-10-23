@@ -12,6 +12,7 @@ class ZoomControlsHud extends StatelessWidget {
     this.maxScale = 8.0,
     this.viewportSize,
     this.viewportSizeProvider,
+    this.onUserZoom,
   });
 
   final TransformationController transformController;
@@ -19,8 +20,10 @@ class ZoomControlsHud extends StatelessWidget {
   final double maxScale;
   final Size? viewportSize;
   final Size? Function()? viewportSizeProvider;
+  final VoidCallback? onUserZoom;
 
   void _zoomBy(double factor) {
+    onUserZoom?.call();
     final current = transformController.value;
     final currentScale = current.getMaxScaleOnAxis();
     final targetScale = (currentScale * factor).clamp(minScale, maxScale);
@@ -48,6 +51,7 @@ class ZoomControlsHud extends StatelessWidget {
   }
 
   void _resetZoom() {
+    onUserZoom?.call();
     HapticFeedback.selectionClick();
     transformController.value = Matrix4.identity();
   }

@@ -32,6 +32,7 @@ import 'widgets/form_screen.dart';
 import 'widgets/organize_sheet.dart';
 import 'widgets/page_grid.dart';
 import 'widgets/page_viewport.dart';
+import 'widgets/touch_session.dart';
 import 'widgets/quick_mark_page.dart';
 import 'widgets/recipes_sheet.dart';
 import 'widgets/secure_sheet.dart';
@@ -234,6 +235,7 @@ class _ViewerPageState extends State<ViewerPage>
   final ScrollController _continuousScroll = ScrollController();
   double _continuousExtent = 1;
   int _viewerPointerCount = 0;
+  final _viewerTouch = TouchSession();
   ReadingMode _readingMode = ReadingMode.single;
   bool _invertDocumentColors = false;
 
@@ -247,22 +249,26 @@ class _ViewerPageState extends State<ViewerPage>
     );
     _zoomAnimationController = controller;
     final start = _viewerTransform.value;
-    final animation = Matrix4Tween(begin: start, end: target).animate(
-      CurvedAnimation(parent: controller, curve: Curves.easeOutCubic),
-    );
+    final animation = Matrix4Tween(
+      begin: start,
+      end: target,
+    ).animate(CurvedAnimation(parent: controller, curve: Curves.easeOutCubic));
     animation.addListener(() {
       _viewerTransform.value = animation.value;
     });
     controller.forward();
   }
-  final BoundedPageCache _horizontalPageImages =
-      BoundedPageCache(maxCapacity: 10);
+
+  final BoundedPageCache _horizontalPageImages = BoundedPageCache(
+    maxCapacity: 10,
+  );
   ReadingPreferenceController? _readingPreference;
   Uint8List? _secondPng;
   double? _secondImageWidthPx;
   double? _secondImageHeightPx;
-  final BoundedPageCache _verticalPageImages =
-      BoundedPageCache(maxCapacity: 10);
+  final BoundedPageCache _verticalPageImages = BoundedPageCache(
+    maxCapacity: 10,
+  );
   Offset? _viewerSwipeStart;
   bool _viewerLongPressSelecting = false;
   Timer? _recoveryDebounce;
@@ -314,6 +320,7 @@ class _ViewerPageState extends State<ViewerPage>
 
   Future<void> _setReadingMode(ReadingMode mode) async {
     if (_readingMode == mode) return;
+    _zoomAnimationController?.stop();
     setState(() {
       _readingMode = mode;
       _textSelectionAnchor = null;
@@ -798,70 +805,100 @@ class _ViewerPageState extends State<ViewerPage>
             ? constraints.maxHeight
             : constraints.maxWidth;
         final isZoomed = _viewerTransform.value.getMaxScaleOnAxis() > 1.05;
-        return InteractiveViewer(
-          key: _readerViewportKey,
-          transformationController: _viewerTransform,
-          minScale: 1,
-          maxScale: 8,
-          panEnabled: isZoomed,
-          scaleEnabled: true,
-          child: NotificationListener<ScrollEndNotification>(
-            onNotification: (_) {
-              if (_continuousScroll.hasClients) {
-                final page =
-                    (_continuousScroll.offset / _continuousExtent).round() + 1;
-                if (page != _page && page >= 1 && page <= _pageCount) {
-                  setState(() => _page = page);
+        return Listener(
+          onPointerDown: (e) {
+            _zoomAnimationController?.stop();
+            _viewerTouch.down(e.pointer);
+          },
+          onPointerUp: (e) => _viewerTouch.up(e.pointer),
+          onPointerCancel: (e) => _viewerTouch.cancel(e.pointer),
+          child: InteractiveViewer(
+            key: _readerViewportKey,
+            transformationController: _viewerTransform,
+            minScale: 1,
+            maxScale: 8,
+            panEnabled: isZoomed,
+            scaleEnabled: true,
+            onInteractionStart: (_) => _zoomAnimationController?.stop(),
+            child: NotificationListener<ScrollEndNotification>(
+              onNotification: (_) {
+                if (_continuousScroll.hasClients) {
+                  final page =
+                      (_continuousScroll.offset / _continuousExtent).round() +
+                      1;
+                  if (page != _page && page >= 1 && page <= _pageCount) {
+                    setState(() => _page = page);
+                  }
                 }
-              }
-              return false;
-            },
-            child: ListView.builder(
-              controller: _continuousScroll,
-              scrollDirection: axis,
-              itemExtent: _continuousExtent,
-              itemCount: _pageCount,
-              itemBuilder: (context, index) {
-                final page = index + 1;
-                final future = _verticalPageImages.putIfAbsent(
-                  page,
-                  () => engine.renderPagePng(
-                    handle: doc,
-                    page1Based: page,
-                    dpi: 96,
-                  ),
-                );
-                return Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      Text('Page $page'),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: FutureBuilder<Uint8List>(
-                          future: future,
-                          builder: (context, snapshot) {
-                            if (snapshot.hasError) {
-                              return Center(
-                                child: Text('Could not render page $page.'),
-                              );
-                            }
-                            if (!snapshot.hasData) {
-                              return const Center(
-                                child: CircularProgressIndicator(),
-                              );
-                            }
-                            return _documentImage(
-                              snapshot.data!,
-                              fit: BoxFit.contain,
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                );
+                return false;
               },
+              child: ListView.builder(
+                controller: _continuousScroll,
+                physics: isZoomed
+                    ? const NeverScrollableScrollPhysics()
+                    : const ClampingScrollPhysics(),
+                scrollDirection: axis,
+                itemExtent: _continuousExtent,
+                itemCount: _pageCount,
+                itemBuilder: (context, index) {
+                  final page = index + 1;
+                  final future = _verticalPageImages.putIfAbsent(
+                    page,
+                    () => engine.renderPagePng(
+                      handle: doc,
+                      page1Based: page,
+                      dpi: 96,
+                    ),
+                  );
+                  return Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      children: [
+                        Text('Page $page'),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: FutureBuilder<Uint8List>(
+                            future: future,
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError) {
+                                return Center(
+                                  child: Text('Could not render page $page.'),
+                                );
+                              }
+                              if (!snapshot.hasData) {
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              }
+                              return LayoutBuilder(
+                                builder: (context, imageConstraints) =>
+                                    SizedBox.expand(
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onLongPressStart: (details) =>
+                                            _offerPageTextSelection(
+                                              page,
+                                              details.localPosition,
+                                              Size(
+                                                imageConstraints.maxWidth,
+                                                imageConstraints.maxHeight,
+                                              ),
+                                            ),
+                                        child: _documentImage(
+                                          snapshot.data!,
+                                          fit: BoxFit.contain,
+                                        ),
+                                      ),
+                                    ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
           ),
         );
@@ -919,6 +956,7 @@ class _ViewerPageState extends State<ViewerPage>
   Future<void> _goto(int page) async {
     if (_busy) return;
     if (page < 1 || page > _pageCount || page == _page) return;
+    _zoomAnimationController?.stop();
     _page = page;
     _textSelectionAnchor = null;
     _textSelectionExtent = null;
@@ -927,6 +965,8 @@ class _ViewerPageState extends State<ViewerPage>
   }
 
   void _onViewerPointerDown(PointerDownEvent event) {
+    _zoomAnimationController?.stop();
+    _viewerTouch.down(event.pointer);
     _viewerPointerCount++;
     if (_viewerPointerCount == 1) {
       _viewerLongPressSelecting = false;
@@ -938,6 +978,7 @@ class _ViewerPageState extends State<ViewerPage>
   }
 
   void _onViewerPointerUp(PointerEvent event) {
+    _viewerTouch.up(event.pointer);
     _viewerPointerCount = math.max(0, _viewerPointerCount - 1);
     if (_viewerPointerCount > 0) return;
     final start = _viewerSwipeStart;
@@ -952,6 +993,13 @@ class _ViewerPageState extends State<ViewerPage>
       return;
     }
     final delta = event.position - start;
+    final swipe = pageForSwipe(
+      delta,
+      currentPage: _page,
+      pageCount: _pageCount,
+      scale: _viewerTransform.value.getMaxScaleOnAxis(),
+    );
+    if (swipe == null) return;
     if (_readingMode == ReadingMode.doublePage && _swipeStartedAtFit) {
       final step = delta.dx < 0 ? 2 : -2;
       final destination = (_page + step).clamp(1, _pageCount);
@@ -973,8 +1021,74 @@ class _ViewerPageState extends State<ViewerPage>
     }
   }
 
+  Future<void> _offerPageTextSelection(
+    int page,
+    Offset local,
+    Size viewport,
+  ) async {
+    final engine = _engine;
+    final doc = _doc;
+    if (engine == null || doc == null || _busy || !_viewerTouch.canEdit) return;
+    try {
+      final size = await engine.pageSize(handle: doc, page1Based: page);
+      final width = size.width * 96 / 72;
+      final height = size.height * 96 / 72;
+      final fit = fitPageScale(
+        viewportWidth: viewport.width,
+        viewportHeight: viewport.height,
+        pageWidth: width,
+        pageHeight: height,
+      );
+      final point =
+          (local -
+              Offset(
+                (viewport.width - width * fit) / 2,
+                (viewport.height - height * fit) / 2,
+              )) /
+          fit;
+      if (!mounted ||
+          _doc != doc ||
+          !_viewerTouch.canEdit ||
+          point.dx < 0 ||
+          point.dy < 0 ||
+          point.dx > width ||
+          point.dy > height) {
+        return;
+      }
+      AppNotice.show(
+        context,
+        AppNotice(
+          message: 'Select text on page $page in single-page view.',
+          action: NoticeAction(
+            label: 'Select text',
+            onPressed: () async {
+              if (!mounted || _busy || _doc != doc) return;
+              _zoomAnimationController?.stop();
+              setState(() {
+                _page = page;
+                _readingMode = ReadingMode.single;
+                _showChrome = true;
+                _textSelectionAnchor = null;
+                _textSelectionExtent = null;
+                _viewerTransform.value = Matrix4.identity();
+              });
+              await _readingPreference?.setMode(ReadingMode.single);
+              if (!mounted) return;
+              await _render();
+              if (mounted && !_busy && _page == page) {
+                _beginTextSelection(point, 1);
+              }
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) _reportError('Could not prepare text selection.', e);
+    }
+  }
+
   void _beginTextSelection(Offset pageLocalPosition, double fitScale) {
-    if (_busy || _viewerPointerCount > 1) return;
+    if (_busy || !_viewerTouch.canEdit || _viewerPointerCount > 1) return;
     _viewerLongPressSelecting = true;
     if (_pageTextLoading) {
       AppNotice.show(
@@ -998,7 +1112,13 @@ class _ViewerPageState extends State<ViewerPage>
     }
     final x = annotation_geo.pxToPt(pageLocalPosition.dx / fitScale, 96);
     final y = annotation_geo.pxToPt(pageLocalPosition.dy / fitScale, 96);
-    final line = _nearestTextLine(x, y);
+    final line = _nearestTextLine(
+      x,
+      y,
+      maxDistance:
+          18 /
+          (fitScale * 96 / 72 * _viewerTransform.value.getMaxScaleOnAxis()),
+    );
     if (line == null) return;
     setState(() {
       _textSelectionAnchor = line;
@@ -1007,6 +1127,7 @@ class _ViewerPageState extends State<ViewerPage>
   }
 
   void _extendTextSelection(Offset pageLocalPosition, double fitScale) {
+    if (!_viewerTouch.canEdit || _textSelectionAnchor == null) return;
     final x = annotation_geo.pxToPt(pageLocalPosition.dx / fitScale, 96);
     final y = annotation_geo.pxToPt(pageLocalPosition.dy / fitScale, 96);
     final line = _nearestTextLine(x, y);
@@ -1034,7 +1155,7 @@ class _ViewerPageState extends State<ViewerPage>
     });
   }
 
-  int? _nearestTextLine(double x, double y) {
+  int? _nearestTextLine(double x, double y, {double maxDistance = 64}) {
     var bestIndex = -1;
     var bestDistance = double.infinity;
     for (var index = 0; index < _pageTextLines.length; index++) {
@@ -1056,7 +1177,9 @@ class _ViewerPageState extends State<ViewerPage>
         bestIndex = index;
       }
     }
-    return bestIndex >= 0 && bestDistance <= 64 * 64 ? bestIndex : null;
+    return bestIndex >= 0 && bestDistance <= maxDistance * maxDistance
+        ? bestIndex
+        : null;
   }
 
   Future<void> _copyTextSelection() async {
@@ -1166,6 +1289,7 @@ class _ViewerPageState extends State<ViewerPage>
   };
 
   void _onViewerPointerCancel(PointerCancelEvent event) {
+    _viewerTouch.cancel(event.pointer);
     _viewerPointerCount = math.max(0, _viewerPointerCount - 1);
     _viewerSwipeStart = null;
   }
@@ -1209,7 +1333,9 @@ class _ViewerPageState extends State<ViewerPage>
               )
               .then((_) => _loadRecents()),
         );
-        unawaited(ReviewPromptManager.instance.recordMilestone('save_document'));
+        unawaited(
+          ReviewPromptManager.instance.recordMilestone('save_document'),
+        );
         TelemetryManager.instance.track('save_document_success', {
           'name': safeName,
           'pages': _pageCount,
@@ -1412,8 +1538,13 @@ class _ViewerPageState extends State<ViewerPage>
       context: context,
       applicationName: 'Overline',
       applicationVersion: '1.0.0',
-      applicationIcon: Image.asset('assets/icon/app_logo.png', width: 48, height: 48),
-      applicationLegalese: '© 2026 Overline Contributors.\n\n'
+      applicationIcon: Image.asset(
+        'assets/icon/app_logo.png',
+        width: 48,
+        height: 48,
+      ),
+      applicationLegalese:
+          '© 2026 Overline Contributors.\n\n'
           'Engine powered by PdfCraft (MIT / Apache-2.0, © ArtCraft Team and contributors).\n'
           'Bundles Hayro (Apache-2.0 / MIT), Foxit Type 1 fonts (BSD-3-Clause), '
           'Adobe CMap (BSD-3-Clause), and SIL OFL typefaces.',
@@ -2947,24 +3078,37 @@ class _ViewerPageState extends State<ViewerPage>
   Future<void> _openTextEdit() async {
     final engine = _engine;
     final doc = _doc;
-    final png = _png;
-    if (engine == null || doc == null || png == null) return;
-    final size = await engine.pageSize(handle: doc, page1Based: _page);
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) => TextEditSheet(
-        engine: engine,
+    final page = _page;
+    if (engine == null || doc == null) return;
+    setState(() => _busy = true);
+    try {
+      final size = await engine.pageSize(handle: doc, page1Based: page);
+      final png = await engine.renderPagePng(
         handle: doc,
-        page: _page,
-        png: png,
-        imageWidthPx: size.width * _annotateDpi / 72,
-        imageHeightPx: size.height * _annotateDpi / 72,
-        onStatusChanged: _onOperationStatus,
-      ),
-    );
+        page1Based: page,
+        dpi: 96,
+      );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TextEditSheet(
+            engine: engine,
+            handle: doc,
+            page: page,
+            png: png,
+            imageWidthPx: size.width * 96 / 72,
+            imageHeightPx: size.height * 96 / 72,
+            onStatusChanged: _onOperationStatus,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) _reportError('Could not open the text editor.', e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<WorkflowOutcome> _openRecipes({String? initialAction}) async {
@@ -3574,8 +3718,9 @@ class _ViewerPageState extends State<ViewerPage>
               ),
             if (_busy) const LinearProgressIndicator(),
             Expanded(
-              child: Builder(
-                builder: (context) {
+              child: ValueListenableBuilder<Matrix4>(
+                valueListenable: _viewerTransform,
+                builder: (context, transform, _) {
                   if (_readingMode == ReadingMode.vertical) {
                     return _verticalPageList();
                   }
@@ -3642,7 +3787,7 @@ class _ViewerPageState extends State<ViewerPage>
                             .getMaxScaleOnAxis();
                         final invScale =
                             (1.0 / (currentScale > 0.05 ? currentScale : 1.0))
-                                .clamp(0.25, 1.0);
+                                .clamp(0.125, 1.0);
                         final handleSize = 48.0 * invScale;
                         final dotSize = 18.0 * invScale;
                         final borderWidth = 2.0 * invScale;
@@ -3715,8 +3860,14 @@ class _ViewerPageState extends State<ViewerPage>
                               key: _readerViewportKey,
                               transformationController: _viewerTransform,
                               panEnabled:
-                                  _canvasMode == DocumentInteractionMode.read ||
-                                      _viewerPointerCount >= 2,
+                                  (_canvasMode ==
+                                          DocumentInteractionMode.read &&
+                                      _viewerTransform.value
+                                              .getMaxScaleOnAxis() >
+                                          1.05) ||
+                                  _viewerPointerCount >= 2,
+                              onInteractionStart: (_) =>
+                                  _zoomAnimationController?.stop(),
                               scaleEnabled: true,
                               onInteractionUpdate: (_) {
                                 if (_viewerTransform.value.getMaxScaleOnAxis() >
@@ -3726,10 +3877,7 @@ class _ViewerPageState extends State<ViewerPage>
                               },
                               minScale: 1,
                               maxScale: 8,
-                              boundaryMargin: const EdgeInsets.symmetric(
-                                horizontal: 48,
-                                vertical: 48,
-                              ),
+                              boundaryMargin: EdgeInsets.zero,
                               clipBehavior: Clip.hardEdge,
                               child: Center(
                                 child: SizedBox(
@@ -3738,7 +3886,7 @@ class _ViewerPageState extends State<ViewerPage>
                                             16 * fitScale.clamp(0.1, 1.0) +
                                             secondPageWidth
                                       : pageWidth,
-                                  height: pageHeight,
+                                  height: combinedSourceHeight * fitScale,
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.opaque,
                                     onTap: () {
@@ -3750,7 +3898,8 @@ class _ViewerPageState extends State<ViewerPage>
                                         );
                                       }
                                     },
-                                    onTapDown: _canvasMode ==
+                                    onTapDown:
+                                        _canvasMode ==
                                             DocumentInteractionMode.sign
                                         ? (details) {
                                             setState(() {
@@ -3761,7 +3910,10 @@ class _ViewerPageState extends State<ViewerPage>
                                                       0.0,
                                                       (sourceWidth -
                                                               _draftSignatureWidthPx)
-                                                          .clamp(0.0, sourceWidth),
+                                                          .clamp(
+                                                            0.0,
+                                                            sourceWidth,
+                                                          ),
                                                     ),
                                                 (details.localPosition.dy /
                                                         fitScale)
@@ -3769,19 +3921,25 @@ class _ViewerPageState extends State<ViewerPage>
                                                       0.0,
                                                       (sourceHeight -
                                                               _draftSignatureHeightPx)
-                                                          .clamp(0.0, sourceHeight),
+                                                          .clamp(
+                                                            0.0,
+                                                            sourceHeight,
+                                                          ),
                                                     ),
                                               );
                                             });
                                           }
                                         : null,
-                                    onPanStart: _canvasMode ==
+                                    onPanStart:
+                                        _canvasMode ==
                                             DocumentInteractionMode.markup
                                         ? (details) {
                                             final local = Offset(
-                                              (details.localPosition.dx / fitScale)
+                                              (details.localPosition.dx /
+                                                      fitScale)
                                                   .clamp(0.0, sourceWidth),
-                                              (details.localPosition.dy / fitScale)
+                                              (details.localPosition.dy /
+                                                      fitScale)
                                                   .clamp(0.0, sourceHeight),
                                             );
                                             setState(() {
@@ -3789,13 +3947,16 @@ class _ViewerPageState extends State<ViewerPage>
                                             });
                                           }
                                         : null,
-                                    onPanUpdate: _canvasMode ==
+                                    onPanUpdate:
+                                        _canvasMode ==
                                             DocumentInteractionMode.markup
                                         ? (details) {
                                             final local = Offset(
-                                              (details.localPosition.dx / fitScale)
+                                              (details.localPosition.dx /
+                                                      fitScale)
                                                   .clamp(0.0, sourceWidth),
-                                              (details.localPosition.dy / fitScale)
+                                              (details.localPosition.dy /
+                                                      fitScale)
                                                   .clamp(0.0, sourceHeight),
                                             );
                                             setState(() {
@@ -3803,17 +3964,20 @@ class _ViewerPageState extends State<ViewerPage>
                                             });
                                           }
                                         : null,
-                                    onPanEnd: _canvasMode ==
+                                    onPanEnd:
+                                        _canvasMode ==
                                             DocumentInteractionMode.markup
                                         ? (_) {
                                             if (_activeStroke.length > 1) {
                                               setState(() {
                                                 final isHighlighter =
-                                                    _markupTool == 'highlighter';
+                                                    _markupTool ==
+                                                    'highlighter';
                                                 _canvasStrokes.add(
                                                   annotation_geo.InkStroke(
                                                     points: [
-                                                      for (final p in _activeStroke)
+                                                      for (final p
+                                                          in _activeStroke)
                                                         annotation_geo.Point(
                                                           p.dx,
                                                           p.dy,
@@ -3852,11 +4016,16 @@ class _ViewerPageState extends State<ViewerPage>
                                         const targetScale = 2.5;
                                         final focal = _doubleTapPosition!;
                                         final pageOriginX =
-                                            (constraints.maxWidth - pageWidth) /
+                                            (constraints.maxWidth -
+                                                (facing
+                                                    ? combinedSourceWidth *
+                                                          fitScale
+                                                    : pageWidth)) /
                                             2;
                                         final pageOriginY =
                                             (constraints.maxHeight -
-                                                pageHeight) /
+                                                combinedSourceHeight *
+                                                    fitScale) /
                                             2;
                                         final cx = pageOriginX + focal.dx;
                                         final cy = pageOriginY + focal.dy;
@@ -3900,15 +4069,41 @@ class _ViewerPageState extends State<ViewerPage>
                                     onLongPressStart: (details) {
                                       if (_canvasMode ==
                                           DocumentInteractionMode.read) {
-                                        _beginTextSelection(
-                                          details.localPosition,
-                                          fitScale,
-                                        );
+                                        if (facing) {
+                                          final second =
+                                              details.localPosition.dx >
+                                              pageWidth + gap * fitScale;
+                                          final width = second
+                                              ? secondPageWidth
+                                              : pageWidth;
+                                          final height = second
+                                              ? secondPageHeight
+                                              : pageHeight;
+                                          final origin = Offset(
+                                            second
+                                                ? pageWidth + gap * fitScale
+                                                : 0,
+                                            (combinedSourceHeight * fitScale -
+                                                    height) /
+                                                2,
+                                          );
+                                          _offerPageTextSelection(
+                                            _page + (second ? 1 : 0),
+                                            details.localPosition - origin,
+                                            Size(width, height),
+                                          );
+                                        } else {
+                                          _beginTextSelection(
+                                            details.localPosition,
+                                            fitScale,
+                                          );
+                                        }
                                       }
                                     },
                                     onLongPressMoveUpdate: (details) {
                                       if (_canvasMode ==
-                                          DocumentInteractionMode.read) {
+                                              DocumentInteractionMode.read &&
+                                          !facing) {
                                         _extendTextSelection(
                                           details.localPosition,
                                           fitScale,
@@ -4398,6 +4593,7 @@ class _ViewerPageState extends State<ViewerPage>
                       pageCount: _pageCount,
                       onNavigate: _goto,
                       transform: _viewerTransform,
+                      onUserZoom: () => _zoomAnimationController?.stop(),
                       viewportSize: () =>
                           (_readerViewportKey.currentContext?.findRenderObject()
                                   as RenderBox?)

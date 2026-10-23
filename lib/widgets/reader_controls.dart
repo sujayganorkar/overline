@@ -12,12 +12,14 @@ class ReaderControls extends StatefulWidget {
     required this.transform,
     this.busy = false,
     this.viewportSize,
+    this.onUserZoom,
   });
   final int page, pageCount;
   final ValueChanged<int> onNavigate;
   final TransformationController transform;
   final bool busy;
   final Size? Function()? viewportSize;
+  final VoidCallback? onUserZoom;
   @override
   State<ReaderControls> createState() => _ReaderControlsState();
 }
@@ -63,6 +65,7 @@ class _ReaderControlsState extends State<ReaderControls> {
             child: ZoomControlsHud(
               transformController: widget.transform,
               viewportSizeProvider: widget.viewportSize,
+              onUserZoom: widget.onUserZoom,
             ),
           ),
       ],
