@@ -225,7 +225,7 @@ class LocalSlmProvider implements AgentProvider {
     // 4. Redaction
     if (lower.contains('redact') || lower.contains('black out') || lower.contains('censor')) {
       // Check if search phrase specified
-      final quoteMatch = RegExp(r'["\']([^"\']+)["\']').firstMatch(prompt);
+      final quoteMatch = RegExp(r'''["']([^"']+)["']''').firstMatch(prompt);
       final phrase = quoteMatch?.group(1) ?? (lower.contains('phone') ? 'phone' : 'ssn');
       return {
         'tool': 'doc_redact',
