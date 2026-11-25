@@ -32,11 +32,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install pinned Android SDK and NDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Set up Flutter
