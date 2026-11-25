@@ -13,12 +13,12 @@ import 'delivery_hub_sheet.dart';
 /// document's own staging path (echoed inside mutating tools' summaries)
 /// are never results — offering them would silently save the wrong bytes.
 bool isOfferableOutput(String path) {
-  if (path.isEmpty || path.startsWith('/')) return false;
-  final segments = path.split(RegExp(r'[/\\]'));
-  if (segments.any((segment) => segment == 'imports' || segment == '..')) {
+  if (!path.startsWith('outputs/') ||
+      path.contains(RegExp(r'[\\:\x00-\x1F]'))) {
     return false;
   }
-  return true;
+  final segments = path.split('/');
+  return segments.every((s) => s.isNotEmpty && s != '.' && s != '..');
 }
 
 /// Find workspace-relative output paths in a tool result and offer Save As
@@ -35,7 +35,17 @@ List<String> outputPathsIn(String jsonSource) {
 
     void visit(Object? node) {
       if (node is Map<String, dynamic>) {
-        if (node['written'] == false) return;
+        if (node['written'] == false ||
+            node['dry_run'] == true ||
+            node['error'] is String ||
+            {
+              'planned',
+              'error',
+              'skipped',
+              'failed',
+            }.contains(node['status'])) {
+          return;
+        }
         final hasOutput = node['output'] is String || node['out'] is String;
         for (final entry in node.entries) {
           final v = entry.value;
@@ -81,6 +91,11 @@ String mimeTypeFor(String path) {
     'txt' => 'text/plain',
     'docx' =>
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'md' || 'markdown' => 'text/markdown',
+    'xml' || 'xdp' => 'application/xml',
+    'json' => 'application/json',
+    'p12' || 'pfx' => 'application/x-pkcs12',
     'rtf' => 'application/rtf',
     'fdf' || 'xfdf' => 'application/vnd.adobe.xfdf',
     _ => 'application/octet-stream',

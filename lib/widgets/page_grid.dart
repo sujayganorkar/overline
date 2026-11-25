@@ -708,21 +708,20 @@ class _PageGridState extends State<PageGrid> {
                       behavior: HitTestBehavior.translucent,
                       onScaleStart: (_) => _baseScale = 1.0,
                       onScaleUpdate: (details) {
-                        if (details.pointerCount >= 2) {
-                          if (details.scale > 1.35 && _columns > 2) {
-                            HapticFeedback.selectionClick();
-                            setState(() {
-                              _columns--;
-                              _baseScale = details.scale;
-                            });
-                          } else if (details.scale < 0.70 && _columns < 4) {
-                            HapticFeedback.selectionClick();
-                            setState(() {
-                              _columns++;
-                              _baseScale = details.scale;
-                            });
-                          }
+                        if (details.pointerCount < 2 || details.scale <= 0) {
+                          return;
                         }
+                        final change = details.scale / _baseScale;
+                        final step = change > 1.35
+                            ? -1
+                            : (change < 0.70 ? 1 : 0);
+                        final columns = (_columns + step).clamp(2, 4);
+                        if (columns == _columns) return;
+                        HapticFeedback.selectionClick();
+                        setState(() {
+                          _columns = columns;
+                          _baseScale = details.scale;
+                        });
                       },
                       child: GridView.builder(
                         padding: const EdgeInsets.all(12),

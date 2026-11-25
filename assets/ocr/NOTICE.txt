@@ -1,0 +1,5 @@
+Ocrs text detection and recognition models
+Robert Knight, ocrs-models, trained on HierText. Distributed unmodified.
+Creative Commons Attribution-ShareAlike 4.0 International
+https://creativecommons.org/licenses/by-sa/4.0/
+https://huggingface.co/robertknight/ocrs

@@ -33,6 +33,7 @@ class FindBar extends StatefulWidget {
     this.matchCount,
     this.onPrevious,
     this.onNext,
+    this.navigationEnabled = true,
   });
 
   final PdfEngineApi? engine;
@@ -46,6 +47,7 @@ class FindBar extends StatefulWidget {
   final int? matchCount;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
+  final bool navigationEnabled;
 
   @override
   State<FindBar> createState() => _FindBarState();
@@ -58,6 +60,7 @@ class _FindBarState extends State<FindBar> {
   bool _searching = false;
   String? _error;
   bool _complete = true;
+  String? _searchedFor;
 
   @override
   void initState() {
@@ -67,8 +70,6 @@ class _FindBarState extends State<FindBar> {
 
   @override
   void dispose() {
-    widget.onMatchesChanged?.call(const []);
-    widget.onActiveIndexChanged?.call(-1);
     if (widget.controller == null) {
       _controller.dispose();
     }
@@ -79,7 +80,8 @@ class _FindBarState extends State<FindBar> {
     final engine = widget.engine;
     if (engine == null) return;
     final query = _controller.text.trim();
-    if (query.isEmpty) return;
+    if (query.isEmpty || _searching) return;
+    FocusScope.of(context).unfocus();
     setState(() {
       _searching = true;
       _error = null;
@@ -129,6 +131,7 @@ class _FindBarState extends State<FindBar> {
       }
       if (!mounted) return;
       setState(() {
+        _searchedFor = query;
         _matches = matches;
         _index = 0;
         _complete = complete;
@@ -170,71 +173,77 @@ class _FindBarState extends State<FindBar> {
     final label = (widget.matchCount != null)
         ? '${effectiveIndex + 1} of $totalCount'
         : _matches.isEmpty
-        ? (_error ?? 'Find in document')
+        ? (_error ?? (_searchedFor == null ? 'Find in document' : 'No matches'))
         : '${effectiveIndex + 1} of $totalCount${_complete ? '' : '+'}';
     final hasMatches = widget.matchCount != null
         ? widget.matchCount! > 0
         : _matches.isNotEmpty;
 
     return Material(
-      elevation: 6,
-      shadowColor: Colors.black26,
-      borderRadius: BorderRadius.circular(16),
-      color: theme.colorScheme.surface.withValues(alpha: 0.96),
+      color: theme.colorScheme.surfaceContainerLow,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        child: Row(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                autofocus: true,
-                textInputAction: TextInputAction.search,
-                decoration: const InputDecoration(
-                  labelText: 'Find in PDF',
-                  hintText: 'Type keyword…',
-                  border: InputBorder.none,
-                  prefixIcon: Icon(Icons.search, size: 20),
-                  isDense: true,
-                ),
-                onSubmitted: (_) => _search(),
-              ),
-            ),
-            if (_searching)
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.bold,
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    decoration: const InputDecoration(
+                      labelText: 'Find in PDF',
+                      isDense: true,
+                    ),
+                    onSubmitted: (_) => _search(),
                   ),
                 ),
-              ),
-            IconButton(
-              onPressed: hasMatches ? () => _step(-1) : null,
-              icon: const Icon(Icons.keyboard_arrow_up, size: 20),
-              tooltip: 'Previous match',
+                IconButton(
+                  onPressed: _searching ? null : _search,
+                  icon: const Icon(Icons.search),
+                  tooltip: 'Search',
+                ),
+                IconButton(
+                  onPressed: widget.onClose,
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Close search',
+                ),
+              ],
             ),
-            IconButton(
-              onPressed: hasMatches ? () => _step(1) : null,
-              icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-              tooltip: 'Next match',
-            ),
-            IconButton(
-              onPressed: _search,
-              icon: const Icon(Icons.arrow_forward, size: 20),
-              tooltip: 'Search',
-            ),
-            IconButton(
-              onPressed: widget.onClose,
-              icon: const Icon(Icons.close, size: 20),
-              tooltip: 'Close search',
+            Row(
+              children: [
+                if (_searching)
+                  const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                Expanded(
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: hasMatches && widget.navigationEnabled
+                      ? () => _step(-1)
+                      : null,
+                  icon: const Icon(Icons.keyboard_arrow_up),
+                  tooltip: 'Previous match',
+                ),
+                IconButton(
+                  onPressed: hasMatches && widget.navigationEnabled
+                      ? () => _step(1)
+                      : null,
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  tooltip: 'Next match',
+                ),
+              ],
             ),
           ],
         ),

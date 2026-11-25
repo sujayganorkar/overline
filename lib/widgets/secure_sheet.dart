@@ -19,10 +19,12 @@ class SecureSheet extends StatefulWidget {
     required this.onStatusChanged,
     this.initialAction,
     this.documentName,
+    this.currentPage = 1,
   });
 
   final String? initialAction;
   final String? documentName;
+  final int currentPage;
   final PdfEngineApi engine;
   final int handle;
   final ValueChanged<bridge.DocumentStatus> onStatusChanged;
@@ -94,9 +96,52 @@ class _SecureSheetState extends State<SecureSheet> {
       );
       if (!mounted) return;
       widget.onStatusChanged(response.status);
+      final result = response.contents
+          .where((c) => c.json.isNotEmpty)
+          .map((c) => jsonDecode(c.json))
+          .whereType<Map>()
+          .firstOrNull;
+      final marked = result?['marked'];
+      if (tool == 'redact_apply') {
+        final elsewhere = result?['still_holding'] as Map?;
+        final total = (elsewhere?['total'] as int?) ?? 0;
+        final warnings =
+            (result?['warnings'] as List?)?.whereType<String>() ??
+            const <String>[];
+        final notes = [
+          if (total > 0)
+            'The redacted text also appears in $total other ${total == 1 ? 'place' : 'places'} in this PDF.',
+          if (elsewhere?['unsearched'] == true)
+            'Some document content could not be checked.',
+          ...warnings,
+        ];
+        if (notes.isNotEmpty) {
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              scrollable: true,
+              title: const Text('Review the redaction results'),
+              content: Text(notes.join('\n\n')),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Back to privacy tools'),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
+      }
       final message = switch (tool) {
-        'redact_apply' => 'Redactions applied and checked. Review the page, then Save to keep the changes.',
-        'redact_mark' => 'Redaction marks added. Review them before applying.',
+        'redact_apply' =>
+          'Redactions applied. Review the page, then save your copy.',
+        'redact_mark' =>
+          marked == 0
+              ? 'No matching text found.'
+              : marked == null
+              ? 'Review the marks before applying.'
+              : '$marked redaction marks added. Review them before applying.',
         'redact_clear' => 'Redaction marks cleared.',
         'doc_protect' => 'Password protection added. Save to keep the change.',
         'doc_unprotect' =>
@@ -113,6 +158,16 @@ class _SecureSheetState extends State<SecureSheet> {
       if (closeAfterSuccess && mounted) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
+      if (tool == 'redact_mark' && e.toString().contains('nothing matched')) {
+        AppNotice.show(
+          context,
+          const AppNotice(
+            message: 'No matching text found.',
+            kind: NoticeKind.info,
+          ),
+        );
+        return;
+      }
       AppNotice.show(
         context,
         AppNotice(
@@ -127,46 +182,127 @@ class _SecureSheetState extends State<SecureSheet> {
   }
 
   Future<void> _redactPhrase() async {
-    final controller = TextEditingController();
-    try {
-      final go = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Mark text for redaction'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Phrase to redact',
-                  hintText: 'Enter phrase to mark across document',
-                  border: OutlineInputBorder(),
+    const patterns = {
+      'find': 'Exact phrase',
+      'email': 'Email addresses',
+      'phone': 'Phone numbers',
+      'credit-card': 'Card numbers',
+      'iban': 'Bank accounts (IBAN)',
+      'ssn': 'US Social Security numbers',
+      'date': 'Dates',
+      'regex': 'Custom pattern',
+    };
+    var kind = 'find', query = '', checksum = 'none';
+    var currentPageOnly = false, wholeWords = false, matchCase = false;
+    final args = await showDialog<Map<String, Object?>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, update) {
+          final typed = kind == 'find' || kind == 'regex';
+          return AlertDialog(
+            scrollable: true,
+            title: const Text('Mark text for redaction'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: kind,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Look for'),
+                  items: [
+                    for (final entry in patterns.entries)
+                      DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) update(() => kind = value);
+                  },
                 ),
+                if (typed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: TextFormField(
+                      initialValue: query,
+                      autocorrect: false,
+                      decoration: InputDecoration(
+                        labelText: kind == 'regex'
+                            ? 'Regular expression'
+                            : 'Phrase to redact',
+                      ),
+                      onChanged: (value) => update(() => query = value),
+                    ),
+                  ),
+                if (kind == 'regex')
+                  DropdownButtonFormField<String>(
+                    initialValue: checksum,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Validate matching numbers',
+                    ),
+                    items: [
+                      for (final value in ['none', 'luhn', 'mod97', 'iban'])
+                        DropdownMenuItem(
+                          value: value,
+                          child: Text(
+                            value == 'none'
+                                ? 'No checksum'
+                                : value.toUpperCase(),
+                          ),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) update(() => checksum = value);
+                    },
+                  ),
+                if (kind == 'find') ...[
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Whole words only'),
+                    value: wholeWords,
+                    onChanged: (v) => update(() => wholeWords = v == true),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Match case'),
+                    value: matchCase,
+                    onChanged: (v) => update(() => matchCase = v == true),
+                  ),
+                ],
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Only page ${widget.currentPage}'),
+                  value: currentPageOnly,
+                  onChanged: (v) => update(() => currentPageOnly = v),
+                ),
+                const Text('Review the marks before applying redactions.'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
               ),
-              const SizedBox(height: 8),
-              const Text('Every match in the document is marked.'),
+              FilledButton(
+                onPressed: typed && query.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(ctx, <String, Object?>{
+                        if (typed) kind: query.trim() else 'pattern': kind,
+                        if (kind == 'regex' && checksum != 'none')
+                          'validate': checksum,
+                        if (kind == 'find' && matchCase) 'case_sensitive': true,
+                        if (kind == 'find' && wholeWords) 'whole_words': true,
+                        if (currentPageOnly) 'page': widget.currentPage,
+                      }),
+                child: const Text('Mark'),
+              ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Mark'),
-            ),
-          ],
-        ),
-      );
-      if (go != true || controller.text.trim().isEmpty || !mounted) return;
-      await _run('redact_mark', {'find': controller.text.trim()});
-    } finally {
-      controller.dispose();
-    }
+          );
+        },
+      ),
+    );
+    if (args != null && mounted) await _run('redact_mark', args);
   }
 
   Future<void> _sanitize() async {

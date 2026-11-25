@@ -225,7 +225,7 @@ class _DeliveryHubSheetState extends State<DeliveryHubSheet> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '$widget.subtitle • $sizeLabel',
+                            '${widget.subtitle} • $sizeLabel',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),

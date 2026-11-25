@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1207856970;
+  int get rustContentHash => -444985600;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -128,6 +128,11 @@ abstract class RustLibApi extends BaseApi {
     required int page1Based,
   });
 
+  Future<SaveSnapshot> crateApiEnginePrepareSaveAs({
+    required Engine that,
+    required int handle,
+  });
+
   Future<Uint8List> crateApiEngineReadOutput({
     required Engine that,
     required String path,
@@ -155,6 +160,8 @@ abstract class RustLibApi extends BaseApi {
     required Engine that,
     required int handle,
   });
+
+  Future<DocumentStatus> crateApiDocumentStatusDefault();
 
   RustArcIncrementStrongCountFnType get rust_arc_increment_strong_count_Engine;
 
@@ -507,6 +514,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<SaveSnapshot> crateApiEnginePrepareSaveAs({
+    required Engine that,
+    required int handle,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEngine(
+            that,
+            serializer,
+          );
+          sse_encode_u_32(handle, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_save_snapshot,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiEnginePrepareSaveAsConstMeta,
+        argValues: [that, handle],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiEnginePrepareSaveAsConstMeta =>
+      const TaskConstMeta(
+        debugName: "Engine_prepare_save_as",
+        argNames: ["that", "handle"],
+      );
+
+  @override
   Future<Uint8List> crateApiEngineReadOutput({
     required Engine that,
     required String path,
@@ -523,7 +568,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 11,
             port: port_,
           );
         },
@@ -564,7 +609,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 12,
             port: port_,
           );
         },
@@ -602,7 +647,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 13,
             port: port_,
           );
         },
@@ -641,7 +686,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 14,
             port: port_,
           );
         },
@@ -678,7 +723,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 15,
             port: port_,
           );
         },
@@ -697,6 +742,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     debugName: "Engine_status",
     argNames: ["that", "handle"],
   );
+
+  @override
+  Future<DocumentStatus> crateApiDocumentStatusDefault() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_document_status,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiDocumentStatusDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiDocumentStatusDefaultConstMeta =>
+      const TaskConstMeta(debugName: "document_status_default", argNames: []);
 
   RustArcIncrementStrongCountFnType
   get rust_arc_increment_strong_count_Engine => wire
@@ -1383,6 +1455,12 @@ class EngineImpl extends RustOpaque implements Engine {
         handle: handle,
         page1Based: page1Based,
       );
+
+  /// Run PDF WillSave actions and prepare the exact bytes for Android's Save As picker.
+  Future<SaveSnapshot> prepareSaveAs({required int handle}) => RustLib
+      .instance
+      .api
+      .crateApiEnginePrepareSaveAs(that: this, handle: handle);
 
   /// Read an output path returned by an upstream tool, confined to this app's workspace.
   Future<Uint8List> readOutput({required String path}) =>

@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:file_picker_platform_interface/file_picker_platform_interface.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show LicenseEntryWithLineBreaks, LicenseRegistry;
 
 import 'widgets/app_notice.dart';
 
@@ -27,6 +28,8 @@ import 'widgets/task_catalog.dart';
 import 'widgets/document_insights_sheet.dart';
 import 'widgets/export_sheet.dart';
 import 'widgets/links_screen.dart';
+import 'widgets/operation_browser.dart';
+import 'widgets/document_review_screen.dart';
 import 'widgets/find_bar.dart';
 import 'widgets/form_screen.dart';
 import 'widgets/organize_sheet.dart';
@@ -53,6 +56,20 @@ import 'widgets/settings_sheet.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    final nativeNotices = await rootBundle.loadString(
+      'assets/licenses/pdf-engine.json',
+    );
+    for (final entry in jsonDecode(nativeNotices) as List<dynamic>) {
+      yield LicenseEntryWithLineBreaks(
+        List<String>.from(entry['packages'] as List<dynamic>),
+        entry['text'] as String,
+      );
+    }
+    final notice = await rootBundle.loadString('assets/ocr/NOTICE.txt');
+    final license = await rootBundle.loadString('assets/ocr/LICENSE.txt');
+    yield LicenseEntryWithLineBreaks(['Ocrs models'], '$notice\n$license');
+  });
   AppDiagnostics.installGlobalErrorHandlers();
   await FeatureFlagService.instance.initialize();
   runApp(const OverlineApp());
@@ -208,6 +225,7 @@ class _ViewerPageState extends State<ViewerPage>
   String? _name;
   String _status = 'Starting engine';
   bool _busy = false;
+  int _renderGeneration = 0;
   bool _dirty = false;
   bool _finding = false;
   List<FindMatch> _findMatches = const [];
@@ -239,6 +257,9 @@ class _ViewerPageState extends State<ViewerPage>
   int _viewerPointerCount = 0;
   final _viewerTouch = TouchSession();
   ReadingMode _readingMode = ReadingMode.single;
+  ReadingMode get _visibleReadingMode => _canvasMode == DocumentInteractionMode.read
+      ? _readingMode
+      : ReadingMode.single;
   bool _invertDocumentColors = false;
 
   void _animateViewerTransform(Matrix4 target) {
@@ -454,6 +475,13 @@ class _ViewerPageState extends State<ViewerPage>
       }
       setState(() {
         _doc = openedDoc;
+        _canvasMode = DocumentInteractionMode.read;
+        _canvasStrokes.clear();
+        _activeStroke.clear();
+        _draftSignaturePositionPx = null;
+        _finding = false;
+        _findMatches = const [];
+        _findActiveIndex = -1;
         _name = name;
         _pageCount = count;
         _page = 1;
@@ -634,8 +662,10 @@ class _ViewerPageState extends State<ViewerPage>
     if (doc == null || engine == null) return;
     final page = _page;
 
-    if (_readingMode == ReadingMode.vertical ||
-        _readingMode == ReadingMode.horizontalContinuous) {
+    final generation = ++_renderGeneration;
+    bool current() => mounted && _doc == doc && _page == page && _renderGeneration == generation;
+    if (_visibleReadingMode == ReadingMode.vertical ||
+        _visibleReadingMode == ReadingMode.horizontalContinuous) {
       setState(() {
         _busy = true;
         _status = 'Rendering pages…';
@@ -650,7 +680,7 @@ class _ViewerPageState extends State<ViewerPage>
         _status = 'Ready';
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _continuousScroll.hasClients) {
+        if (current() && _continuousScroll.hasClients) {
           _continuousScroll.jumpTo(
             ((_page - 1) * _continuousExtent).clamp(
               0,
@@ -675,7 +705,7 @@ class _ViewerPageState extends State<ViewerPage>
       final pageSize = await engine.pageSize(handle: doc, page1Based: page);
       Uint8List? secondPng;
       bridge.PageSize? secondPageSize;
-      if (_readingMode == ReadingMode.doublePage && page < _pageCount) {
+      if (_visibleReadingMode == ReadingMode.doublePage && page < _pageCount) {
         secondPng = await engine.renderPagePng(
           handle: doc,
           page1Based: page + 1,
@@ -686,7 +716,7 @@ class _ViewerPageState extends State<ViewerPage>
           page1Based: page + 1,
         );
       }
-      if (!mounted || _doc != doc || _page != page) return;
+      if (!current()) return;
       setState(() {
         _png = png;
         _imageWidthPx = pageSize.width * 96 / 72;
@@ -703,13 +733,13 @@ class _ViewerPageState extends State<ViewerPage>
         _pageTextLoading = true;
         _status = 'Ready';
       });
-      await _refreshMarkers(engine, doc, page, pageSize: pageSize);
+      await _refreshMarkers(engine, doc, page, pageSize, current);
     } catch (e) {
-      if (!mounted) return;
+      if (!current()) return;
       _reportError('Render failed.', e);
       _png = null;
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (current()) setState(() => _busy = false);
     }
   }
 
@@ -719,18 +749,17 @@ class _ViewerPageState extends State<ViewerPage>
   Future<void> _refreshMarkers(
     PdfEngineApi engine,
     int doc,
-    int page, {
-    bridge.PageSize? pageSize,
-  }) async {
+    int page,
+    bridge.PageSize size,
+    bool Function() current,
+  ) async {
     try {
-      final size =
-          pageSize ?? await engine.pageSize(handle: doc, page1Based: page);
       final response = await engine.executeTool(
         handle: doc,
         tool: 'comment_list',
         argumentsJson: '{"page": $page}',
       );
-      if (!mounted || _doc != doc || _page != page) return;
+      if (!current()) return;
       const dpi = 96.0;
       final widthPx = size.width * dpi / 72.0;
       final heightPx = size.height * dpi / 72.0;
@@ -765,6 +794,7 @@ class _ViewerPageState extends State<ViewerPage>
         tool: 'text_lines',
         argumentsJson: jsonEncode({'page': page}),
       );
+      if (!current()) return;
       final pageLines = <TextLineBox>[];
       for (final content in lineResponse.contents) {
         if (content.json.isEmpty) continue;
@@ -791,7 +821,7 @@ class _ViewerPageState extends State<ViewerPage>
         _pageTextLoading = false;
       });
     } catch (e) {
-      if (mounted) setState(() => _pageTextLoading = false);
+      if (current()) setState(() => _pageTextLoading = false);
       debugPrint('Could not load comment markers: $e');
     }
   }
@@ -988,6 +1018,7 @@ class _ViewerPageState extends State<ViewerPage>
     final start = _viewerSwipeStart;
     _viewerSwipeStart = null;
     if (start == null ||
+        _canvasMode != DocumentInteractionMode.read ||
         !_swipeStartedAtFit ||
         _busy ||
         _doc == null ||
@@ -1013,16 +1044,8 @@ class _ViewerPageState extends State<ViewerPage>
       }
       return;
     }
-    final destination = pageForSwipe(
-      delta,
-      currentPage: _page,
-      pageCount: _pageCount,
-      scale: _viewerTransform.value.getMaxScaleOnAxis(),
-    );
-    if (destination != null) {
-      HapticFeedback.selectionClick();
-      unawaited(_goto(destination));
-    }
+    HapticFeedback.selectionClick();
+    unawaited(_goto(swipe));
   }
 
   Future<void> _offerPageTextSelection(
@@ -1301,15 +1324,17 @@ class _ViewerPageState extends State<ViewerPage>
   Future<void> _save() async {
     final doc = _doc;
     final engine = _engine;
-    if (doc == null || engine == null || _name == null) return;
+    if (doc == null || engine == null || _name == null || _busy) return;
     bridge.SaveSnapshot? snapshot;
     var externalSaved = false;
+    var committed = false;
+    setState(() => _busy = true);
     _recoveryDebounce?.cancel();
     _updateCheckTimer?.cancel();
-    await _recoveryWrites;
-    setState(() => _busy = true);
     try {
-      snapshot = await engine.saveSnapshot(handle: doc);
+      await _recoveryWrites;
+      if (!mounted) return;
+      snapshot = await engine.prepareSaveAs(handle: doc);
       final safeName = _name!.replaceAll(RegExp(r'[/\\]'), '_');
       final uri = await FilePickerPlatform.instance.saveFile(
         fileName: safeName,
@@ -1319,14 +1344,13 @@ class _ViewerPageState extends State<ViewerPage>
       );
       if (!mounted) return;
       if (uri == null) {
-        await engine.cancelSave(handle: doc, token: snapshot.token);
-        snapshot = null;
         setState(() => _status = 'Save cancelled');
       } else {
         externalSaved = true;
         final savedBytes = snapshot.bytes;
         await engine.commitSave(handle: doc, token: snapshot.token);
         snapshot = null;
+        committed = true;
         final status = await engine.status(handle: doc);
         await _clearRecoveryCheckpoint();
         unawaited(
@@ -1361,13 +1385,6 @@ class _ViewerPageState extends State<ViewerPage>
         );
       }
     } catch (e) {
-      if (snapshot != null) {
-        try {
-          await engine.cancelSave(handle: doc, token: snapshot.token);
-        } catch (cancelError) {
-          debugPrint('Could not cancel pending save snapshot: $cancelError');
-        }
-      }
       if (!mounted) return;
       _reportError(
         externalSaved
@@ -1376,6 +1393,24 @@ class _ViewerPageState extends State<ViewerPage>
         e,
       );
     } finally {
+      if (snapshot != null) {
+        try {
+          await engine.cancelSave(handle: doc, token: snapshot.token);
+        } catch (error) {
+          debugPrint('Could not release Save As snapshot: $error');
+        }
+      }
+      if (!committed && mounted && _doc == doc) {
+        try {
+          final status = await engine.status(handle: doc);
+          if (mounted && _doc == doc) {
+            setState(() => _dirty = status.dirty || _recoveredUnsaved);
+            if (_dirty) _scheduleRecoveryCheckpoint();
+          }
+        } catch (error) {
+          debugPrint('Could not refresh document after Save As: $error');
+        }
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -1545,7 +1580,7 @@ class _ViewerPageState extends State<ViewerPage>
     showAboutDialog(
       context: context,
       applicationName: 'Overline',
-      applicationVersion: '1.0.0',
+      applicationVersion: UpdateCheckerService.appVersion,
       applicationIcon: Image.asset(
         'assets/icon/app_logo.png',
         width: 48,
@@ -1681,6 +1716,8 @@ class _ViewerPageState extends State<ViewerPage>
 
   void _onOperationStatus(bridge.DocumentStatus status) {
     if (!mounted) return;
+    _verticalPageImages.clear();
+    _horizontalPageImages.clear();
     TelemetryManager.instance.track('operation_status', {
       'pages': status.pageCount,
       'dirty': status.dirty,
@@ -2336,6 +2373,7 @@ class _ViewerPageState extends State<ViewerPage>
   // --- In-Canvas Unified Modes ---
 
   void _enterMarkupMode() {
+    if (_busy) return;
     setState(() {
       _canvasMode = DocumentInteractionMode.markup;
       _canvasStrokes.clear();
@@ -2343,6 +2381,7 @@ class _ViewerPageState extends State<ViewerPage>
       _textSelectionAnchor = null;
       _textSelectionExtent = null;
     });
+    if (_readingMode != ReadingMode.single) unawaited(_render());
   }
 
   void _undoLastCanvasStroke() {
@@ -2357,6 +2396,7 @@ class _ViewerPageState extends State<ViewerPage>
       _activeStroke.clear();
       _canvasMode = DocumentInteractionMode.read;
     });
+    if (_readingMode != ReadingMode.single) unawaited(_render());
   }
 
   Future<void> _applyCanvasStrokes() async {
@@ -2381,19 +2421,13 @@ class _ViewerPageState extends State<ViewerPage>
           ),
         ),
       );
-      _onOperationStatus(response.status);
-      final png = await engine.renderPagePng(
-        handle: doc,
-        page1Based: _page,
-        dpi: 96,
-      );
       if (!mounted) return;
       setState(() {
-        _png = png;
         _canvasStrokes.clear();
         _activeStroke.clear();
         _canvasMode = DocumentInteractionMode.read;
       });
+      _onOperationStatus(response.status);
       AppNotice.show(
         context,
         AppNotice(
@@ -2410,15 +2444,16 @@ class _ViewerPageState extends State<ViewerPage>
   }
 
   Future<void> _enterSignMode() async {
-    final doc = _doc;
-    final engine = _engine;
-    if (doc == null || engine == null) return;
+    if (_busy || _doc == null || _engine == null) return;
     setState(() {
       _canvasMode = DocumentInteractionMode.sign;
       _activeSignatureIsDate = false;
-      final w = _imageWidthPx ?? 600;
-      final h = _imageHeightPx ?? 800;
-      _draftSignaturePositionPx = Offset(w * 0.25, h * 0.7);
+      _draftSignaturePositionPx = null;
+    });
+    if (_readingMode != ReadingMode.single) await _render();
+    if (!mounted || _canvasMode != DocumentInteractionMode.sign) return;
+    setState(() {
+      _draftSignaturePositionPx = Offset((_imageWidthPx ?? 600) * .25, (_imageHeightPx ?? 800) * .7);
     });
     try {
       final store = SignatureStore();
@@ -2437,6 +2472,7 @@ class _ViewerPageState extends State<ViewerPage>
       _draftSignaturePositionPx = null;
       _canvasMode = DocumentInteractionMode.read;
     });
+    if (_readingMode != ReadingMode.single) unawaited(_render());
   }
 
   Future<void> _applySignaturePlacement() async {
@@ -2491,18 +2527,12 @@ class _ViewerPageState extends State<ViewerPage>
         return;
       }
 
-      _onOperationStatus(response.status);
-      final png = await engine.renderPagePng(
-        handle: doc,
-        page1Based: _page,
-        dpi: 96,
-      );
       if (!mounted) return;
       setState(() {
-        _png = png;
         _draftSignaturePositionPx = null;
         _canvasMode = DocumentInteractionMode.read;
       });
+      _onOperationStatus(response.status);
       AppNotice.show(
         context,
         AppNotice(
@@ -3028,6 +3058,7 @@ class _ViewerPageState extends State<ViewerPage>
       isScrollControlled: true,
       useSafeArea: true,
       builder: (context) => SecureSheet(
+        currentPage: _page,
         documentName: _name,
         initialAction: initialAction,
         engine: engine,
@@ -3175,17 +3206,13 @@ class _ViewerPageState extends State<ViewerPage>
   Future<void> _showTools() async {
     AppNotice.dismiss(context);
     if (_busy || _launchingTask || _engine == null) return;
-    final task = await showModalBottomSheet<PdfTask>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: FractionallySizedBox(
-          heightFactor: 0.92,
-          child: TaskCatalog(
+    final engine = _engine!;
+    final task = await Navigator.push<PdfTask>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          body: TaskCatalog(
+            loadOperations: engine.operationCatalog,
             onSelected: (task) => Navigator.pop(context, task),
           ),
         ),
@@ -3218,6 +3245,11 @@ class _ViewerPageState extends State<ViewerPage>
         if (!mounted || _doc == null) return;
       }
       if (!mounted) return;
+      final operation = task.operation;
+      if (operation != null) {
+        await _openEngineTask(operation);
+        return;
+      }
       switch (task.id) {
         case 'blank':
           await _newBlankPdf();
@@ -3272,11 +3304,88 @@ class _ViewerPageState extends State<ViewerPage>
     }
   }
 
+  Future<void> _openEngineTask(bridge.OperationInfo operation) async {
+    final engine = _engine!;
+    final doc = _doc;
+    if (operation.id == 'printer_papers' && doc != null) {
+      await _print();
+      return;
+    }
+    if (isDocumentReviewTool(operation.id) && doc != null) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (reviewContext) => DocumentReviewScreen(
+            engine: engine,
+            handle: doc,
+            tool: operation.id,
+            currentPage: _page,
+            pageCount: _pageCount,
+            onStatusChanged: _onOperationStatus,
+            onShowPage: (page) {
+              Navigator.pop(reviewContext);
+              _goto(page);
+            },
+          ),
+        ),
+      );
+      return;
+    }
+    ({Uint8List bytes, String name, int page})? output;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (routeContext) {
+          void openResult(Uint8List bytes, String name, int page) {
+            output = (bytes: bytes, name: name, page: page);
+            Navigator.pop(routeContext);
+          }
+
+          return OperationScreen(
+            engine: engine,
+            handle: doc ?? 0,
+            operation: operation,
+            currentPage: _page,
+            onStatusChanged: _onOperationStatus,
+            onRename: (name) {
+              if (mounted && _doc == doc) setState(() => _name = name);
+            },
+            onOpenDocument: (bytes, name) => openResult(bytes, name, 1),
+            onOpenDocumentAtPage: openResult,
+          );
+        },
+      ),
+    );
+    final selected = output;
+    if (mounted && selected != null) {
+      await _openDocumentBytes(selected.name, selected.bytes);
+      if (mounted && _doc != null && _doc != doc && selected.page > 1) {
+        await _goto(selected.page.clamp(1, _pageCount));
+      }
+    }
+  }
+
+  void _closeFind() {
+    setState(() {
+      _finding = false;
+      _findMatches = const [];
+      _findActiveIndex = -1;
+    });
+  }
+
   Future<void> _goHome() async {
     AppNotice.dismiss(context);
     if (_busy || _launchingTask) return;
+    if (_canvasMode == DocumentInteractionMode.markup) {
+      _cancelMarkup();
+      return;
+    }
+    if (_canvasMode == DocumentInteractionMode.sign) {
+      _cancelSign();
+      return;
+    }
     if (_finding) {
-      setState(() => _finding = false);
+      _closeFind();
       return;
     }
     if (_textSelectionAnchor != null) {
@@ -3474,6 +3583,9 @@ class _ViewerPageState extends State<ViewerPage>
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final compactToolbar = screenWidth < 600;
+    final menuUndo = screenWidth < 420;
     return PopScope(
       canPop: _doc == null && !_busy && !_launchingTask,
       onPopInvokedWithResult: (didPop, result) {
@@ -3550,13 +3662,16 @@ class _ViewerPageState extends State<ViewerPage>
                                     tooltip: 'Close document',
                                     icon: const Icon(Icons.arrow_back),
                                   ),
-                            title: Text(
-                              _name ?? 'Overline',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            title: Tooltip(
+                              message: _name ?? 'Overline',
+                              child: Text(
+                                _name ?? 'Overline',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             actions: [
-                              IconButton(
+                              if (_doc == null || !compactToolbar) IconButton(
                                 icon: const Icon(Icons.settings_outlined),
                                 tooltip: 'Settings',
                                 onPressed: () {
@@ -3579,7 +3694,7 @@ class _ViewerPageState extends State<ViewerPage>
                                     child: const Text('Finish'),
                                   ),
                                 ),
-                                IconButton(
+                                if (!compactToolbar) IconButton(
                                   onPressed: _busy ? null : _print,
                                   icon: const Icon(Icons.print_outlined),
                                   tooltip: 'Print this PDF',
@@ -3611,7 +3726,7 @@ class _ViewerPageState extends State<ViewerPage>
                                       )
                                       .toList(),
                                 ),
-                                IconButton(
+                                if (!menuUndo) IconButton(
                                   onPressed: _busy || _undoLabel == null
                                       ? null
                                       : _undo,
@@ -3625,6 +3740,12 @@ class _ViewerPageState extends State<ViewerPage>
                                   enabled: !_busy,
                                   onSelected: (value) {
                                     switch (value) {
+                                      case 'settings':
+                                        SettingsSheet.show(context, onRecentsCleared: _loadRecents, onShowLicenses: () => _showAboutAndLicenses(context));
+                                      case 'print':
+                                        _print();
+                                      case 'undo':
+                                        _undo();
                                       case 'redo':
                                         _redo();
                                       case 'find':
@@ -3645,6 +3766,12 @@ class _ViewerPageState extends State<ViewerPage>
                                     }
                                   },
                                   itemBuilder: (_) => [
+                                    if (menuUndo && _undoLabel != null)
+                                      PopupMenuItem(value: 'undo', child: Text('Undo $_undoLabel')),
+                                    if (compactToolbar) ...[
+                                      const PopupMenuItem(value: 'print', child: Text('Print this PDF')),
+                                      const PopupMenuItem(value: 'settings', child: Text('Settings')),
+                                    ],
                                     PopupMenuItem(
                                       value: 'redo',
                                       enabled: _redoLabel != null,
@@ -3727,15 +3854,25 @@ class _ViewerPageState extends State<ViewerPage>
                   ],
                 ),
               ),
+            if (_finding && _doc != null)
+              FindBar(
+                key: ValueKey(('find', _doc)),
+                engine: _engine!, handle: _doc!,
+                navigationEnabled: !_busy,
+                onJumpToPage: _goto,
+                onMatchesChanged: (matches) => setState(() => _findMatches = matches),
+                onActiveIndexChanged: (index) => setState(() => _findActiveIndex = index),
+                onClose: _closeFind,
+              ),
             if (_busy) const LinearProgressIndicator(),
             Expanded(
               child: ValueListenableBuilder<Matrix4>(
                 valueListenable: _viewerTransform,
                 builder: (context, transform, _) {
-                  if (_readingMode == ReadingMode.vertical) {
+                  if (_doc != null && _visibleReadingMode == ReadingMode.vertical) {
                     return _verticalPageList();
                   }
-                  if (_readingMode == ReadingMode.horizontalContinuous) {
+                  if (_doc != null && _visibleReadingMode == ReadingMode.horizontalContinuous) {
                     return _horizontalPageList();
                   }
                   if (_png == null) {
@@ -3750,7 +3887,7 @@ class _ViewerPageState extends State<ViewerPage>
                       final secondWidth = _secondImageWidthPx ?? 0;
                       final secondHeight = _secondImageHeightPx ?? 0;
                       final facing =
-                          _readingMode == ReadingMode.doublePage &&
+                          _visibleReadingMode == ReadingMode.doublePage &&
                           _secondPng != null;
                       final gap = facing ? 16.0 : 0.0;
                       final combinedSourceWidth =
@@ -4543,27 +4680,6 @@ class _ViewerPageState extends State<ViewerPage>
                             ),
                           ),
 
-                          // Floating Overlay: Find Bar HUD
-                          if (_finding && _doc != null)
-                            Positioned(
-                              top: 12,
-                              left: 16,
-                              right: 16,
-                              child: FindBar(
-                                engine: _engine!,
-                                handle: _doc!,
-                                onJumpToPage: _goto,
-                                onMatchesChanged: (matches) =>
-                                    setState(() => _findMatches = matches),
-                                onActiveIndexChanged: (index) =>
-                                    setState(() => _findActiveIndex = index),
-                                onClose: () => setState(() {
-                                  _finding = false;
-                                  _findMatches = const [];
-                                  _findActiveIndex = -1;
-                                }),
-                              ),
-                            ),
                         ],
                       );
                     },

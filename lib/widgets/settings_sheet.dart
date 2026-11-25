@@ -236,7 +236,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
                 children: [
                   ListTile(
                     leading: const Icon(Icons.system_update_alt_outlined),
-                    title: const Text('Overline v1.0.0'),
+                    title: const Text('Overline v${UpdateCheckerService.appVersion}'),
                     subtitle: Text(
                       _updateStatus ?? 'Tap to check for updates on GitHub',
                       style: TextStyle(

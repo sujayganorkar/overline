@@ -65,9 +65,11 @@ cd pdfcraft-mobile
 ```
 
 The tracked submodule pointer pins PdfCraft at the validated revision. If a clone already exists,
-run `git submodule update --init --recursive`. The root Cargo workspace uses relative paths and
-patches crates.io to the submodule's vendored `hayro`/`lopdf`; no user-specific Cargo paths are
-needed. Keep `Cargo.lock` and `pubspec.lock` under version control.
+run `git submodule update --init --recursive`. The root Cargo workspace uses the engine's pinned
+craft-libs revisions for Hayro and its vendored copies of lopdf and Vello. Keep `Cargo.lock` and
+`pubspec.lock` under version control. After changing the native dependencies, run
+`python3 tools/native-notices.py` with Python 3.11 or newer to refresh the engine and renderer
+notices available in the app's Licenses screen. CI checks them against the resolved sources.
 
 ## 6. iOS (future milestone)
 

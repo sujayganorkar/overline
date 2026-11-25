@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -78,6 +79,26 @@ void main() {
   });
 
   group('BoundedPageCache', () {
+    test('late renders cannot evict a page refreshed after an edit', () async {
+      final cache = BoundedPageCache(maxBytes: 100);
+      addTearDown(cache.dispose);
+      final oldRender = Completer<Uint8List>();
+      final oldImage = cache.putIfAbsent(1, () => oldRender.future);
+      cache.clear();
+      await cache.putIfAbsent(1, () async => Uint8List(60));
+      oldRender.complete(Uint8List(80));
+      await oldImage;
+      expect(cache.contains(1), isTrue);
+      expect(cache.currentBytes, 60);
+    });
+
+    test('a failed page render can be retried', () async {
+      final cache = BoundedPageCache();
+      addTearDown(cache.dispose);
+      await expectLater(cache.putIfAbsent(1, () async => throw StateError('render')), throwsStateError);
+      await cache.putIfAbsent(1, () async => Uint8List(8));
+      expect(cache.currentBytes, 8);
+    });
     test('evicts least recently used pages when capacity is exceeded', () async {
       final cache = BoundedPageCache(maxCapacity: 3);
       final dummyBytes = Uint8List.fromList([1, 2, 3]);

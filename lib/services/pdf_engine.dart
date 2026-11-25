@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 
 import '../bridge/api.dart' as bridge;
 import '../bridge/frb_generated.dart';
+import 'offline_ocr.dart';
 
 abstract interface class PdfEngineApi {
   Future<int> open({
@@ -37,6 +39,8 @@ abstract interface class PdfEngineApi {
 
   Future<bridge.SaveSnapshot> saveSnapshot({required int handle});
 
+  Future<bridge.SaveSnapshot> prepareSaveAs({required int handle});
+
   Future<void> commitSave({required int handle, required int token});
 
   Future<void> cancelSave({required int handle, required int token});
@@ -52,6 +56,7 @@ class PdfCraftEngine implements PdfEngineApi {
   PdfCraftEngine(this._engine);
 
   final bridge.Engine _engine;
+  Future<void>? _ocrReady;
 
   @override
   Future<int> open({
@@ -90,15 +95,56 @@ class PdfCraftEngine implements PdfEngineApi {
     required int handle,
     required String tool,
     required String argumentsJson,
-  }) => _engine.executeTool(
-    handle: handle,
-    tool: tool,
-    argumentsJson: argumentsJson,
-  );
+  }) async {
+    if (tool == 'printer_papers') {
+      const paths = MethodChannel('app.overline.pdf/paths');
+      final papers = await paths.invokeListMethod<Object?>(
+        'getStandardPaperSizes',
+      );
+      return bridge.OperationResponse(
+        status: const bridge.DocumentStatus(
+          pageCount: 0,
+          dirty: false,
+          editable: false,
+          canUndo: '',
+          canRedo: '',
+        ),
+        contents: [
+          bridge.OperationContent(
+            json: jsonEncode({
+              'source': 'Android standard media sizes',
+              'papers': papers,
+              'note': 'Choose a printer in Android print preview to see the sizes it supports.',
+            }),
+            png: Uint8List(0),
+            width: 0,
+            height: 0,
+          ),
+        ],
+      );
+    }
+    if (tool.startsWith('ocr_') || tool == 'doc_batch') {
+      try {
+        await (_ocrReady ??= prepareOfflineOcr());
+      } catch (_) {
+        _ocrReady = null;
+        rethrow;
+      }
+    }
+    return _engine.executeTool(
+      handle: handle,
+      tool: tool,
+      argumentsJson: argumentsJson,
+    );
+  }
 
   @override
   Future<bridge.SaveSnapshot> saveSnapshot({required int handle}) =>
       _engine.saveSnapshot(handle: handle);
+
+  @override
+  Future<bridge.SaveSnapshot> prepareSaveAs({required int handle}) =>
+      _engine.prepareSaveAs(handle: handle);
 
   @override
   Future<void> commitSave({required int handle, required int token}) =>

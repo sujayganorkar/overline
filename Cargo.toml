@@ -3,13 +3,17 @@ resolver = "3"
 members = ["rust"]
 exclude = ["third_party/pdfcraft"]
 
-# PdfCraft vendors patched hayro/lopdf (patches bound upstream). Patch crates.io to the fork's
-# vendor/ so our build matches the engine's tested behavior exactly.
+# Cargo reads patches only from the root workspace. Match the PDF engine's rendering patches.
 [patch.crates-io]
-hayro = { path = "third_party/pdfcraft/vendor/hayro" }
-hayro-interpret = { path = "third_party/pdfcraft/vendor/hayro-interpret" }
-hayro-syntax = { path = "third_party/pdfcraft/vendor/hayro-syntax" }
+hayro = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "9eb02be84f21898e247daeb2af5827c9fe85a3a0" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "e7873217287876f76a045550369c90a541693c33" }
 lopdf = { path = "third_party/pdfcraft/vendor/lopdf" }
+vello_common = { path = "third_party/pdfcraft/vendor/vello_common" }
+vello_cpu = { path = "third_party/pdfcraft/vendor/vello_cpu" }
 
 [workspace.dependencies]
 flutter_rust_bridge = "=2.13.0"

@@ -68,6 +68,31 @@ void main() {
     expect(jsonDecode(engine.lastArguments!)['pages'], [1]);
     expect(jsonDecode(engine.lastArguments!)['to'], 2);
   });
+
+  testWidgets('one pinch step changes grid density once', (tester) async {
+    await tester.pumpWidget(_pageGridApp(_PageGridEngine()));
+    for (final columns in [3, 4]) {
+      await tester.tap(find.byTooltip('Grid columns ($columns)'));
+      await tester.pump();
+    }
+    final center = tester.getCenter(find.byType(GridView));
+    final left = await tester.startGesture(center - const Offset(100, 0));
+    final right = await tester.startGesture(center + const Offset(100, 0));
+    for (final distance in [90, 80, 70, 60, 55, 52, 50]) {
+      await left.moveTo(center - Offset(distance.toDouble(), 0));
+      await right.moveTo(center + Offset(distance.toDouble(), 0));
+      await tester.pump();
+    }
+    await left.up();
+    await right.up();
+    await tester.pump();
+    expect(
+      tester
+          .widgetList<IconButton>(find.byType(IconButton))
+          .map((button) => button.tooltip),
+      contains('Grid columns (3)'),
+    );
+  });
 }
 
 Widget _pageGridApp(_PageGridEngine engine) => MaterialApp(
@@ -141,6 +166,10 @@ class _PageGridEngine implements PdfEngineApi {
   @override
   Future<bridge.SaveSnapshot> saveSnapshot({required int handle}) =>
       throw UnimplementedError();
+  @override
+  Future<bridge.SaveSnapshot> prepareSaveAs({required int handle}) =>
+      saveSnapshot(handle: handle);
+
   @override
   Future<void> commitSave({required int handle, required int token}) =>
       throw UnimplementedError();

@@ -23,6 +23,7 @@ void main() {
         ),
       );
       expect(find.text('Save to device'), findsOneWidget);
+      expect(find.textContaining('export.txt •'), findsOneWidget);
       expect(find.text('Share file'), findsOneWidget);
       expect(find.text('Open in reader'), findsNothing);
       expect(mimeTypeFor('export.txt'), 'text/plain');

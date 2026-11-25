@@ -36,6 +36,49 @@ void main() {
     expect(pages, [6]);
     expect(find.byType(Slider), findsNothing);
   });
+  testWidgets('page jump stays reachable above the phone keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 700);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    final transform = TransformationController();
+    addTearDown(transform.dispose);
+    final pages = <int>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          bottomNavigationBar: ReaderControls(
+            page: 1,
+            pageCount: 9,
+            transform: transform,
+            onNavigate: pages.add,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Page 1 of 9'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(TextField));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 310);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '10');
+    await tester.testTextInput.receiveAction(TextInputAction.go);
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+    expect(pages, isEmpty);
+    await tester.enterText(find.byType(TextField), '4');
+    await tester.pump();
+    expect(find.text('Go to page 4').hitTestable(), findsOneWidget);
+    expect(tester.getBottomLeft(find.text('Go to page 4')).dy, lessThan(390));
+    await tester.testTextInput.receiveAction(TextInputAction.go);
+    await tester.pumpAndSettle();
+    expect(pages, [4]);
+    expect(find.byType(TextField), findsNothing);
+  });
+
   testWidgets('selection controls wrap at narrow widths with large text', (
     tester,
   ) async {

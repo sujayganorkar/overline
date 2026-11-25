@@ -193,13 +193,25 @@ class _ExportSheetState extends State<ExportSheet> {
       context: context,
       useSafeArea: true,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
           children: [
             ListTile(
               leading: const Icon(Icons.description_outlined),
               title: const Text('Microsoft Word (.docx)'),
               onTap: () => Navigator.pop(context, 'docx'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.slideshow_outlined),
+              title: const Text('PowerPoint (.pptx)'),
+              subtitle: const Text('One editable slide per page'),
+              onTap: () => Navigator.pop(context, 'pptx'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: const Text('Markdown (.md)'),
+              subtitle: const Text('Headings, text and tables'),
+              onTap: () => Navigator.pop(context, 'md'),
             ),
             ListTile(
               leading: const Icon(Icons.web_outlined),
@@ -216,7 +228,10 @@ class _ExportSheetState extends State<ExportSheet> {
       ),
     );
     if (extension == null || !mounted) return;
-    await _exportSingle('doc_export_office', 'converted.$extension');
+    final name = (widget.documentName ?? 'converted')
+        .replaceAll(RegExp(r'[/\\]'), '_')
+        .replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '');
+    await _exportSingle('doc_export_office', '${name.isEmpty ? 'converted' : name}.$extension');
   }
 
   Future<void> _showReport(String title, String body) async {

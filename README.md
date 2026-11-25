@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/sujayganorkar/overline/releases/latest">
-    <img src="https://img.shields.io/github/v/release/sujayganorkar/pdfcraft-mobile?label=Release&color=blue" alt="Latest Release">
+    <img src="https://img.shields.io/github/v/release/sujayganorkar/overline?label=Release&color=blue" alt="Latest Release">
   </a>
   <img src="https://img.shields.io/badge/Platform-Android%2064--bit-green" alt="Platform">
   <img src="https://img.shields.io/badge/License-Apache%202.0%20%2F%20MIT-orange" alt="License">
@@ -32,6 +32,8 @@ Unlike web converters and bloated subscription PDF readers that upload your sens
   - **Form Filling:** Fill out standard PDF form fields directly on your phone.
   - **Document Redaction:** Black out sensitive text and metadata before sharing.
   - **Merge & Split:** Combine multiple documents or extract specific page ranges.
+- **Tools on Android** includes find and replace, word counts, bookmark and attachment editing, form templates, batch processing, Bates numbering, print checks, editable PowerPoint export, and Markdown export. Open **Tools** to search by name or browse by category.
+- **Scan review and accessibility** lets you tap a recognized word to correct it, add searchable text to a scan, preview headings before tagging a supported PDF, and inspect possible false redactions. The bundled OCR models read unaccented Latin text offline.
 - **🌙 Comfortable Reading:** Dark theme support with optional PDF color inversion for comfortable nighttime reading.
 - **🛡️ Auto Draft Recovery:** Crash-resilient architecture that automatically preserves your unsaved edits if Android terminates the app in the background.
 - **🔄 Built-In Update Checker:** In-app notification when new GitHub releases are available, plus direct compatibility with Obtainium for background updates.
@@ -63,7 +65,7 @@ If you use [Obtainium](https://github.com/ImranR98/Obtainium):
 Overline uses a high-performance hybrid architecture:
 - **UI & Presentation:** Flutter (Material 3) with custom gestures, multi-touch canvas viewport, and adaptive layout.
 - **Bridge Layer:** [`flutter_rust_bridge`](https://github.com/fzyzcjy/flutter_rust_bridge) providing zero-copy asynchronous FFI between Dart and native code.
-- **Engine Core:** Native Rust library cross-compiled for `arm64-v8a` and `x86_64` targets with 16 KB ELF page alignment for modern Linux/Android kernels.
+- **Engine Core:** PdfCraft [v0.22.0](https://github.com/storytold/pdfcraft/releases/tag/v0.22.0), cross-compiled for `arm64-v8a` and `x86_64` with 16 KB ELF page alignment.
 
 ---
 
@@ -96,6 +98,12 @@ The resulting binary will be saved at `dist/apk/Overline-latest.apk`.
 To run all unit and widget tests:
 ```bash
 flutter test
+```
+
+After building the native libraries, run the touch and document-review suites on a connected Android device or emulator. Use its identifier from `flutter devices`.
+
+```bash
+flutter test integration_test -d <device-id>
 ```
 
 ---

@@ -3,6 +3,8 @@ package app.overline.pdf
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.print.PrintAttributes
+import android.system.Os
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -10,10 +12,13 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity() {
+    private val batchSources by lazy { BatchSources(this) }
     private var pendingPdfMap: Map<String, String>? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val ocrModels = File(noBackupFilesDir, "ocr-a917b23d-86c145c2")
+        Os.setenv("PDFCRAFT_MODELS", ocrModels.absolutePath, true)
         // Clean up stale incoming intent files older than 24 hours
         pruneStaleIncomingCache()
 
@@ -24,6 +29,27 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "getOcrModelDir" -> result.success(ocrModels.absolutePath)
+                "getStandardPaperSizes" -> {
+                    val type = PrintAttributes.MediaSize::class.java
+                    val papers = type.fields.filter { it.type == type }.mapNotNull { field ->
+                        val size = field.get(null) as PrintAttributes.MediaSize
+                        if (size == PrintAttributes.MediaSize.UNKNOWN_PORTRAIT ||
+                            size == PrintAttributes.MediaSize.UNKNOWN_LANDSCAPE) null
+                        else mapOf(
+                            "name" to size.getLabel(packageManager).toString(),
+                            "width_pt" to size.widthMils * 0.072,
+                            "height_pt" to size.heightMils * 0.072
+                        )
+                    }.sortedBy { it["name"].toString() }
+                    result.success(papers)
+                }
+                "pickBatchSources" -> batchSources.pick(call.argument<Boolean>("folder") == true, result)
+                "stageBatchSources" -> batchSources.stage(call.argument<List<String>>("tokens").orEmpty(),
+                    call.argument<Boolean>("recursive") == true, result)
+                "cancelBatchImport" -> { batchSources.cancel(); result.success(null) }
+                "forgetBatchSources" -> { batchSources.forget(call.argument<List<String>>("tokens").orEmpty()); result.success(null) }
+                "releaseBatchStage" -> { batchSources.release(call.argument<String>("token")); result.success(null) }
                 "getSupportDir" -> {
                     val dir = File(filesDir, "overline-workspace")
                     if (!dir.exists() && !dir.mkdirs()) {
@@ -56,6 +82,15 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (!batchSources.receive(requestCode, resultCode, data)) super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onDestroy() {
+        batchSources.close()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {

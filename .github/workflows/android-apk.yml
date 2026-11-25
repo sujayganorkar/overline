@@ -57,6 +57,7 @@ jobs:
           cargo fmt --all --check
           cargo test --locked -p pdfcraft-mobile-api
           cargo clippy --locked -p pdfcraft-mobile-api --all-targets -- -D warnings
+          python3 tools/native-notices.py --check
           flutter pub get --enforce-lockfile
           flutter analyze
           flutter test

@@ -73,14 +73,33 @@ async fn editing_tools_end_to_end() {
     )
     .await;
 
-    // Redact phrase, then apply and confirm the text is gone.
+    // Verify the original text is searchable, then check the saved, reopened PDF.
+    let found = run(&engine, doc, "text_find", r#"{"query":"Hello"}"#).await;
+    assert_eq!(found[0]["count"], 1);
+    run(
+        &engine,
+        doc,
+        "bookmark_add",
+        r#"{"page":1,"title":"Hello bookmark"}"#,
+    )
+    .await;
     run(&engine, doc, "redact_mark", r#"{"find":"Hello"}"#).await;
-    run(&engine, doc, "redact_apply", "{}").await;
-    let out = run(&engine, doc, "text_find", r#"{"query":"Hello"}"#).await;
-    assert!(
-        !has_text(&out, "Hello PdfCraft"),
-        "applied redaction must remove the text"
-    );
+    let applied = run(&engine, doc, "redact_apply", "{}").await;
+    assert_eq!(applied[0]["still_holding"]["bookmarks"], 1);
+    assert_eq!(applied[0]["still_holding"]["unsearched"], false);
+    assert!(has_text(&applied[0]["warnings"], "bookmark"));
+    let redacted = engine.prepare_save_as(doc).await.unwrap();
+    engine.commit_save(doc, redacted.token).await.unwrap();
+    let reopened = engine
+        .open("redacted.pdf".into(), redacted.bytes, None)
+        .await
+        .unwrap();
+    let found = run(&engine, reopened, "text_find", r#"{"query":"Hello"}"#).await;
+    assert_eq!(found[0]["complete"], true);
+    assert_eq!(found[0]["count"], 0, "redacted text survives Save As");
+    let bookmarks = run(&engine, reopened, "bookmark_list", "{}").await;
+    assert!(has_text(&bookmarks[0]["bookmarks"], "Hello bookmark"));
+    engine.close(reopened, false).await.unwrap();
 
     // Measure, labels, marks, crop.
     run(

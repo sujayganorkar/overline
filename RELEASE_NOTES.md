@@ -1,25 +1,10 @@
-# Overline v1.0.0 - Fast, Private, Offline PDF Editor
+# Overline v1.1.0
 
-Overline is a fast, offline, privacy-first PDF editor and signer for Android powered by a high-performance native Rust core. 
+Overline now includes 72 new PDF tools powered by PdfCraft v0.22.0. Open **Tools** to search by name or browse by category.
 
-Unlike web converters and bloated subscription PDF readers, Overline executes document modifications directly on your device CPU—your tax returns, legal contracts, and medical records never leave your phone.
+- Correct words directly on a scanned page with offline OCR, then save searchable text or an editable PDF copy.
+- Export PDF pages to editable PowerPoint slides or Markdown. Process folders and subfolders, or add Bates numbers across files.
+- Find and replace text, manage bookmarks and attachments, preview screen-reader tags, and check for text left behind by redactions.
+- Pinch to zoom, pan a zoomed page, and draw across a page without accidentally turning it. Search stays visible as you move between matches.
 
-### ✨ Key Features
-- **⚡ Blazing Fast Native Engine:** Built in Rust with 64-bit SIMD optimization and Android 15 16 KB page-size support.
-- **🔒 100% Offline & Private:** Zero account required, zero cloud uploads. Operates completely in airplane mode.
-- **✍️ Digital Signatures:** Draw or type signatures once; place and resize anywhere. Signatures are encrypted locally in app-private flash.
-- **📄 Core PDF Tools:**
-  - Fast page reorganizer: Rotate, reorder, delete, and extract pages.
-  - Text markup: Highlighting, strikethroughs, and freehand annotations.
-  - In-canvas text editing and document redaction.
-  - Multi-file merge and split.
-- **🛡️ Crash Resilience:** Automatic draft recovery preserves your edits even if Android closes the app in the background.
-- **🔄 Auto-Update Notification:** Built-in lightweight notification check for new GitHub releases.
-- **📲 Compatible with Obtainium:** Paste this repository link into Obtainium to receive instant background updates.
-
-### 📦 Download & Verification
-- **APK (ARM64 & x86_64):** Download `Overline-latest.apk` below.
-- **Verify Checksum:**
-  ```bash
-  sha256sum -c Overline-latest.apk.sha256
-  ```
+Download **Overline-latest.apk** for Android ARM64 or x86_64. It can update an existing v1.0.0 installation. To verify the download, place the APK and its checksum file in the same folder and run `sha256sum -c Overline-latest.apk.sha256`.

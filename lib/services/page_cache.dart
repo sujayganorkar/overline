@@ -39,13 +39,21 @@ class BoundedPageCache {
 
     _evictToCapacity();
 
-    final future = ifAbsent().then((bytes) {
-      final size = bytes.lengthInBytes;
-      _byteSizes[page] = size;
-      _currentBytes += size;
-      _evictToBytes();
-      return bytes;
-    });
+    late final Future<Uint8List> future;
+    future = Future<Uint8List>.sync(ifAbsent).then(
+      (bytes) {
+        if (identical(_cache[page], future)) {
+          _byteSizes[page] = bytes.lengthInBytes;
+          _currentBytes += bytes.lengthInBytes;
+          _evictToBytes();
+        }
+        return bytes;
+      },
+      onError: (Object error, StackTrace stack) {
+        if (identical(_cache[page], future)) _cache.remove(page);
+        Error.throwWithStackTrace(error, stack);
+      },
+    );
 
     _cache[page] = future;
     return future;

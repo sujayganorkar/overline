@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `cancel_save`, `checked_page`, `close_document`, `commit_save`, `dispatch`, `document_status`, `execute_tool`, `mobile_tool`, `open_document`, `operation_info`, `page_size`, `prepare_runtime`, `read_output`, `render_page`, `safe_file_name`, `save_snapshot`, `stage_file`, `tool_catalog`, `worker_gone`, `worker_main`
+// These functions are ignored because they are not marked as `pub`: `call_with_second_pdf`, `cancel_save`, `catch_panic`, `checked_page`, `close_document`, `close_temporary`, `commit_save`, `current_document_arg`, `dispatch`, `document_status`, `execute_tool`, `mobile_tool`, `open_document`, `operation_contents`, `operation_info`, `output_pdf_path`, `page_size`, `prepare_runtime`, `read_output`, `relativize_workspace_paths`, `render_page`, `result_json_mut`, `safe_file_name`, `save_snapshot`, `second_pdf_arg`, `stage_file`, `stage_link_target`, `tool_catalog`, `worker_gone`, `worker_main`, `write_document_copy`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Cmd`, `MobileDoc`, `OpenReq`, `PendingSave`, `Runtime`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`
 
@@ -42,6 +42,9 @@ abstract class Engine implements RustOpaqueInterface {
 
   Future<PageSize> pageSize({required int handle, required int page1Based});
 
+  /// Run PDF WillSave actions and prepare the exact bytes for Android's Save As picker.
+  Future<SaveSnapshot> prepareSaveAs({required int handle});
+
   /// Read an output path returned by an upstream tool, confined to this app's workspace.
   Future<Uint8List> readOutput({required String path});
 
@@ -74,6 +77,9 @@ class DocumentStatus {
     required this.canUndo,
     required this.canRedo,
   });
+
+  static Future<DocumentStatus> default_() =>
+      RustLib.instance.api.crateApiDocumentStatusDefault();
 
   @override
   int get hashCode =>

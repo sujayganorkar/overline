@@ -30,6 +30,7 @@ class _ReaderControlsState extends State<ReaderControls> {
     final page = await showModalBottomSheet<int>(
       context: context,
       useSafeArea: true,
+      isScrollControlled: true,
       builder: (_) =>
           _PageNavigation(page: widget.page, count: widget.pageCount),
     );
@@ -93,6 +94,14 @@ class _PageNavigationState extends State<_PageNavigation> {
     _page = page;
     _number.text = '$page';
   });
+
+  void _goToPage() {
+    final page = int.tryParse(_number.text);
+    if (page != null && page >= 1 && page <= widget.count) {
+      Navigator.pop(context, page);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.fromLTRB(
@@ -141,6 +150,8 @@ class _PageNavigationState extends State<_PageNavigation> {
                   child: TextField(
                     controller: _number,
                     keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.go,
+                    onSubmitted: (_) => _goToPage(),
                     decoration: InputDecoration(
                       labelText: 'Page 1–${widget.count}',
                       border: const OutlineInputBorder(),
@@ -180,9 +191,7 @@ class _PageNavigationState extends State<_PageNavigation> {
                 onChanged: (v) => _select(v.round()),
               ),
             FilledButton(
-              onPressed: int.tryParse(_number.text) == _page
-                  ? () => Navigator.pop(context, _page)
-                  : null,
+              onPressed: int.tryParse(_number.text) == _page ? _goToPage : null,
               child: Text('Go to page $_page'),
             ),
           ],

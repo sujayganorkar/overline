@@ -57,6 +57,10 @@ class FakePdfEngine implements PdfEngineApi {
       bridge.SaveSnapshot(token: 1, bytes: Uint8List(0));
 
   @override
+  Future<bridge.SaveSnapshot> prepareSaveAs({required int handle}) =>
+      saveSnapshot(handle: handle);
+
+  @override
   Future<void> commitSave({required int handle, required int token}) async {}
 
   @override

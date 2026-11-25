@@ -23,6 +23,7 @@ class UpdateCheckerService {
   static final UpdateCheckerService instance = UpdateCheckerService._();
 
   static const _channel = MethodChannel('app.overline.pdf/paths');
+  static const String appVersion = '1.1.0';
   static const String repoOwner = 'sujayganorkar';
   static const String repoName = 'overline';
 
@@ -37,7 +38,7 @@ class UpdateCheckerService {
 
   /// Check GitHub Releases API for the latest release.
   Future<UpdateInfo?> checkForUpdate({
-    String currentVersion = '1.0.0',
+    String currentVersion = appVersion,
     String? customRepo,
   }) async {
     try {
